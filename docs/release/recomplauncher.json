@@ -1,0 +1,196 @@
+{
+  "$schema": "https://recomplauncher.com/schema/recomplauncher.json",
+  "format": 1,
+  "name": "DOR2 Static Recomp",
+  "repo": "Spaced1127/DOR2-Static-Recomp",
+  "game": {
+    "kind": "iso",
+    "label": "Your USA GameCube disc image (.iso) of WWE Day of Reckoning 2 (GW2E78).",
+    "dumps": [
+      {
+        "name": "USA",
+        "size": 1459978240,
+        "crc32": "bb092c3a"
+      }
+    ]
+  },
+  "prepare": {
+    "program": ["DOR2Prepare.exe"],
+    "args": [
+      "--input", "{game}",
+      "--output", "{install}/Game"
+    ],
+    "label": "Extracting the game files from your disc",
+    "timeout": 1800
+  },
+  "start": {
+    "program": ["DOR2RecompRunner.exe"],
+    "args": [
+      "--game", "{install}/Game",
+      "--module", "{install}/gGW2E78_recomp.dll",
+      "--user-dir", "{local}/DOR2Recomp",
+      "--graphics", "Vulkan",
+      "--audio", "Cubeb"
+    ]
+  },
+  "config": [
+    {
+      "id": "main",
+      "format": "ini",
+      "file": [
+        {
+          "path": "{local}/DOR2Recomp/config.ini"
+        }
+      ],
+      "ensure": {
+        "backend": "Vulkan",
+        "resolution": "1920x1080",
+        "efb_access": "true",
+        "emulation_speed": "1",
+        "cpu_core": "jit"
+      },
+      "always": {
+        "efb_access": "true",
+        "emulation_speed": "1"
+      },
+      "new": {
+        "resolution": "1920x1080",
+        "backend": "Vulkan",
+        "fullscreen": "true",
+        "show_fps_in_title": "true",
+        "msaa": "2",
+        "ssaa": "false",
+        "anisotropy": "2",
+        "vsync": "true",
+        "aspect": "auto",
+        "widescreen_hack": "false",
+        "efb_access": "true",
+        "mute": "false",
+        "volume": "100",
+        "emulation_speed": "1",
+        "cpu_core": "jit"
+      }
+    }
+  ],
+  "settings": [
+    {
+      "id": "core",
+      "label": "CPU core",
+      "in": "args",
+      "help": "JIT is the default, verified core. Static recomp runs the generated native module (experimental; rare instability in some heavy modes).",
+      "choices": [
+        {
+          "label": "JIT (default)",
+          "args": []
+        },
+        {
+          "label": "Static recomp (experimental)",
+          "args": ["--core", "static"]
+        }
+      ]
+    },
+    {
+      "id": "resolution",
+      "label": "Resolution",
+      "help": "The internal render resolution, not the window size.",
+      "choices": [
+        {
+          "label": "1x (640x528)",
+          "set": { "resolution": "640x528" }
+        },
+        {
+          "label": "2x (1280x1056)",
+          "set": { "resolution": "1280x1056" }
+        },
+        {
+          "label": "3x (1920x1080)",
+          "set": { "resolution": "1920x1080" }
+        }
+      ],
+      "defaults": { "resolution": "1920x1080" }
+    },
+    {
+      "id": "window",
+      "label": "Window",
+      "help": "Fullscreen fills the screen. F11 or Alt+Enter toggles it in game.",
+      "choices": [
+        {
+          "label": "Fullscreen",
+          "set": { "fullscreen": "true" }
+        },
+        {
+          "label": "Windowed",
+          "set": { "fullscreen": "false" }
+        }
+      ],
+      "defaults": { "fullscreen": "true" }
+    },
+    {
+      "id": "vsync",
+      "label": "VSync",
+      "help": "Locks presentation to the display. Turn it off only for benchmarking.",
+      "choices": [
+        {
+          "label": "On",
+          "set": { "vsync": "true" }
+        },
+        {
+          "label": "Off",
+          "set": { "vsync": "false" }
+        }
+      ],
+      "defaults": { "vsync": "true" }
+    },
+    {
+      "id": "msaa",
+      "label": "Anti-aliasing",
+      "help": "MSAA samples. Lower values are faster.",
+      "choices": [
+        {
+          "label": "Off",
+          "set": { "msaa": "1" }
+        },
+        {
+          "label": "2x",
+          "set": { "msaa": "2" }
+        },
+        {
+          "label": "4x",
+          "set": { "msaa": "4" }
+        }
+      ],
+      "defaults": { "msaa": "2" }
+    }
+  ],
+  "saves": [
+    "{local}/DOR2Recomp/GC",
+    "{local}/DOR2Recomp/StateSaves"
+  ],
+  "folders": {
+    "saves": [
+      { "path": "{local}/DOR2Recomp/GC" },
+      { "path": "{local}/DOR2Recomp/StateSaves" }
+    ],
+    "logs": [
+      { "path": "{local}/DOR2Recomp/Logs" }
+    ]
+  },
+  "actions": [
+    {
+      "id": "saves",
+      "label": "Saves",
+      "help": "Your memory card saves and savestates.",
+      "open": "saves"
+    },
+    {
+      "id": "logs",
+      "label": "Logs",
+      "help": "Runtime logs for troubleshooting.",
+      "open": "logs"
+    }
+  ],
+  "exit_codes": {
+    "1": "The game could not start. Check the Logs folder.",
+    "2": "The disc or the extracted game did not validate. Run setup again with a USA dump of WWE Day of Reckoning 2 (GW2E78)."
+  }
+}

@@ -1,0 +1,63 @@
+# ---------------------------------------------------------------------------
+# Game data. Never commit or publish any of this.
+# ---------------------------------------------------------------------------
+*.iso
+*.rvz
+*.gcm
+*.wbfs
+*.gcz
+*.dol
+*.elf
+*.rel
+*.gci
+*.sav
+*.state
+*.raw
+*.mcd
+*.ps2
+*.bnr
+
+# Extracted game trees and local work
+/work/
+/extracted/
+/Game/
+/games/
+
+# ---------------------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------------------
+/build/
+/dist/
+/out/
+*.dll
+*.lib
+*.exp
+*.pdb
+*.ilk
+*.obj
+*.o
+*.res
+*.profraw
+*.profdata
+*.gcda
+*.gcno
+
+# Reference checkout used only while preparing this repo
+/tools/guide-ref/
+
+# Agent planning scratch
+/.planning/
+
+# ---------------------------------------------------------------------------
+# Tooling
+# ---------------------------------------------------------------------------
+__pycache__/
+*.pyc
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+CMakeUserPresets.json
+Thumbs.db
+Desktop.ini

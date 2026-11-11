@@ -1,0 +1,5 @@
+[staticrecomp] core init
+[staticrecomp] module loaded: H:\Projects\Day of Reckoning 2\build\moderngekko\gGW2E78_recomp.dll entry=0x80003154
+[lockstep] ENABLED: start=0 limit=0 maxreport=25 stepcap=20000 whitelist=0
+[staticrecomp] shutdown: native=23959 fallback=0 native_exc=3 hook_fb=1649 smc_failed=0 verifications=40 reverify_events=6 bursts=976 cycles=6878654
+[lockstep] summary: checks=1043 reports=0 skipped_fallback=30 skipped_zero=1 cap_hits=0 filtered=0 undercharges=0 max_deficit=0 distinct_pcs=1043

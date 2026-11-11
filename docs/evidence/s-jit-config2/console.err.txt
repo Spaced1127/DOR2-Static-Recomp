@@ -1,0 +1,2 @@
+[video] backend=Vulkan efb_scale=3 msaa=2 ssaa=0 anisotropy=2 vsync=1 efb_access=1 aspect=0 widescreen_hack=0
+[audio] backend=Cubeb mute=0 volume=100

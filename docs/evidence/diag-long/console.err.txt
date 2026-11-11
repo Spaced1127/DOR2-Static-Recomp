@@ -1,0 +1,3 @@
+[staticrecomp] core init
+[staticrecomp] module loaded: H:\Projects\Day of Reckoning 2\build\moderngekko\gGW2E78_recomp.dll entry=0x80003154
+[staticrecomp] shutdown: native=111060286 fallback=0 native_exc=72558 hook_fb=17757993 smc_failed=0 verifications=100 reverify_events=6 bursts=3268074 cycles=42046742575

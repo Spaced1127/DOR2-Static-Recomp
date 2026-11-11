@@ -1,0 +1,3 @@
+[submodule "lib/ModernGekko-Template"]
+	path = lib/ModernGekko-Template
+	url = https://github.com/ExpansionPak/ModernGekko-Template.git

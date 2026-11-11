@@ -1,0 +1,21 @@
+[video] backend=Vulkan efb_scale=3 msaa=1 ssaa=0 anisotropy=1 vsync=0 efb_access=0 aspect=0 widescreen_hack=0
+[audio] backend=Cubeb mute=0 volume=100
+[staticrecomp] core init
+[staticrecomp] module loaded: H:\Projects\Day of Reckoning 2\build\moderngekko\gGW2E78_recomp.dll entry=0x80003154
+[staticrecomp] shutdown: native=77958239 fallback=0 native_exc=35075 hook_fb=7099546 smc_failed=0 verifications=202 reverify_events=8 bursts=1248185 cycles=14501058954
+[staticrecomp] dispatch-site pc=800eddcc samples=1661
+[staticrecomp] dispatch-site pc=800eddd0 samples=1651
+[staticrecomp] dispatch-site pc=8040a9b0 samples=1411
+[staticrecomp] dispatch-site pc=80420214 samples=1241
+[staticrecomp] dispatch-site pc=80404a70 samples=1062
+[staticrecomp] dispatch-site pc=80407660 samples=754
+[staticrecomp] dispatch-site pc=80409d70 samples=722
+[staticrecomp] dispatch-site pc=80407688 samples=706
+[staticrecomp] dispatch-site pc=8040ed9c samples=698
+[staticrecomp] dispatch-site pc=8040ed84 samples=695
+[staticrecomp] dispatch-site pc=8040edb8 samples=680
+[staticrecomp] dispatch-site pc=80404a9c samples=412
+[staticrecomp] dispatch-site pc=80102db0 samples=396
+[staticrecomp] dispatch-site pc=80102b60 samples=386
+[staticrecomp] dispatch-site pc=8032e32c samples=315
+[staticrecomp] dispatch-site pc=8032e2f4 samples=304

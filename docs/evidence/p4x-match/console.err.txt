@@ -1,0 +1,5 @@
+[video] backend=Vulkan efb_scale=4 msaa=1 ssaa=0 anisotropy=1 vsync=0 efb_access=0 aspect=0 widescreen_hack=0
+[audio] backend=Cubeb mute=0 volume=100
+[staticrecomp] core init
+[staticrecomp] module loaded: H:\Projects\Day of Reckoning 2\build\moderngekko\gGW2E78_recomp.dll entry=0x80003154
+[staticrecomp] shutdown: native=2158119677 fallback=0 native_exc=920211 hook_fb=147941637 smc_failed=0 verifications=156 reverify_events=6 bursts=19848049 cycles=186681593813
