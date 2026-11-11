@@ -112,8 +112,13 @@ Updated: 2026-11-11 (takeover completion pass; supersedes the scaffold-era STATE
 - Verified: expanded-zip hash/layout/icons/game-data-scan/schema(0 err);
   staged DOR2Prepare (progress 1.000, DOL+CRC match); staged JIT boot 59.94 fps
 - Release notes: `dist\release-notes-v0.1.0.md`
-- Published: no (awaiting user approval; no GitHub repo yet)
-- `repo` field: placeholder until the GitHub repository exists
+- Published: **yes** — https://github.com/Spaced1127/DOR2-Static-Recomp/releases/tag/v0.1.0
+  (user-approved commit + tag + publish 2026-11-11; commit 7f11135, tag v0.1.0)
+- `repo` field: `Spaced1127/DOR2-Static-Recomp`
+- Download-back verified: zip sha256 matches SHA256SUMS; recomplauncher.json at
+  top; icons present; game-data scan clean; schema 0 errors.
+- Source reproducibility: upstream submodule pins + `patches/moderngekko-settings.patch`
+  applied via `scripts/apply-patches.ps1` (see REPRODUCE.md).
 - Compliance: savestates moved out of `docs\evidence` into `work\states`
   (game data must not enter Git); `smoke-test.ps1` writes states there;
   `.planning/` git-ignored; README legal wording now discloses the shipped
