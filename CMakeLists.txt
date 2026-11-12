@@ -85,6 +85,20 @@ if(WIN32)
 endif()
 
 # ---------------------------------------------------------------------------
+# Launcher artwork (SteamGridDB, user-approved override of the original-art
+# policy; see docs/ASSETS.md). Copied next to the launcher so it can load them;
+# the launcher falls back to procedural art when they are absent.
+# ---------------------------------------------------------------------------
+if(WIN32)
+  # Static launcher artwork (SteamGridDB, user-approved; see docs/ASSETS.md).
+  # Copied next to the launcher at configure time; the launcher falls back to
+  # procedural art when the files are absent.
+  file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/assets/sgdb/dor2_grid.png"
+            "${CMAKE_CURRENT_SOURCE_DIR}/assets/sgdb/dor2_logo.png"
+       DESTINATION "${CMAKE_BINARY_DIR}")
+endif()
+
+# ---------------------------------------------------------------------------
 # DOR2RecompRunner: user-facing runner with --core static|jit. It starts
 # DOR2RecompRunnerCore.exe after selecting the CPU core.
 # ---------------------------------------------------------------------------

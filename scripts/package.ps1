@@ -58,6 +58,11 @@ Copy-Item (Join-Path $Root 'docs\release\README.txt') (Join-Path $Stage 'README.
 Copy-Item (Join-Path $Root 'docs\release\PLAYERS.md') (Join-Path $Stage 'PLAYERS.md') -Force
 Copy-Item (Join-Path $Root 'docs\release\recomplauncher.json') `
     (Join-Path $Stage 'recomplauncher.json') -Force
+# Launcher artwork (SteamGridDB, user-approved; see docs/ASSETS.md).
+foreach ($art in @('dor2_grid.png', 'dor2_logo.png')) {
+    $src = Join-Path $Root "assets\sgdb\$art"
+    if (Test-Path $src) { Copy-Item $src (Join-Path $Stage $art) -Force }
+}
 
 @'
 @echo off
