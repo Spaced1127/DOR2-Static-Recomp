@@ -3,8 +3,8 @@
 1 ICON "dor2.ico"
 
 1 VERSIONINFO
-FILEVERSION     0,1,0,0
-PRODUCTVERSION  0,1,0,0
+FILEVERSION     0,1,1,0
+PRODUCTVERSION  0,1,1,0
 FILEFLAGSMASK   0x3fL
 FILEFLAGS       0x0L
 FILEOS          VOS_NT_WINDOWS32
@@ -17,12 +17,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "DOR2 Static Recomp"
             VALUE "FileDescription",  "WWE Day of Reckoning 2 Disc Preparer"
-            VALUE "FileVersion",      "0.1.0.0"
+            VALUE "FileVersion",      "0.1.1.0"
             VALUE "InternalName",     "DOR2Prepare"
             VALUE "LegalCopyright",   "GPL-3.0. No game data included."
             VALUE "OriginalFilename", "DOR2Prepare.exe"
             VALUE "ProductName",      "DOR2 Static Recomp"
-            VALUE "ProductVersion",   "0.1.0.0"
+            VALUE "ProductVersion",   "0.1.1.0"
         END
     END
     BLOCK "VarFileInfo"

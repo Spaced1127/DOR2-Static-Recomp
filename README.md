@@ -8,7 +8,7 @@ following the [GameCube Static Recomp Guide](https://github.com/Spaced1127/GameC
 This repository contains **no game data**. You must supply your own legally
 dumped disc image. The launcher extracts it locally; nothing is uploaded.
 
-## Status: v0.1.0
+## Status: v0.1.1
 
 | Item | Value |
 | --- | --- |
@@ -94,7 +94,7 @@ The runtime ships two cores:
 `config.ini` accepts `cpu_core=static|jit`. The GameCube VI runs at 59.94 Hz;
 `emulation_speed` is clamped to 1.0 and uncapped modes are not exposed.
 
-### Known issues (v0.1.0)
+### Known issues (v0.1.1)
 
 - The experimental **static** core can, rarely, corrupt memory in some heavy
   modes (entrances / fatal-4-way), producing "Invalid read/write" panic alerts
@@ -111,7 +111,7 @@ The runtime ships two cores:
 powershell -ExecutionPolicy Bypass -File scripts\package.ps1
 ```
 
-The script assembles `dist\DOR2StaticRecomp-v0.1.0-Windows-x64\`, refuses to
+The script assembles `dist\DOR2StaticRecomp-v0.1.1-Windows-x64\`, refuses to
 continue if any game data is present, validates `recomplauncher.json` against
 the official schema, and writes a zip plus `SHA256SUMS.txt`.
 

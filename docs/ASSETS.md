@@ -20,7 +20,7 @@ so the build does not need to regenerate it.
 ## Executable resources
 
 `assets\launcher.rc`, `runner.rc`, `runner-core.rc` and `prepare.rc` embed the
-icon and version info (`0.1.0.0`) into each Windows executable. They are attached
+icon and version info (`0.1.1.0`) into each Windows executable. They are attached
 from the top-level `CMakeLists.txt`; upstream runtime sources are untouched.
 
 Verify after a build:

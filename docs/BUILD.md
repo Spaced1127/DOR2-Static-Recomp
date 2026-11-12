@@ -177,7 +177,7 @@ Get-Content work\user\Logs\ModernGekko.log -Tail 80
   `dcbf`/`dcbst`/`dcbi`/`icbi` cache ops. Streaming games issue thousands per
   frame, so millions over a long run are expected.
 - `STATICRECOMP_LOCKSTEP=1` enables differential verification against the
-  interpreter (summary on stderr at shutdown). Known v0.1.0 limitation: FPSCR
+  interpreter (summary on stderr at shutdown). Known v0.1.1 limitation: FPSCR
   result-classification bits (FPRF/XX) can differ after single-precision and
   paired-single FP ops (`fmuls`, `vmhaddshs`), with occasional cascading
   float-formatting diffs. Baseline measured 2026-11-11: 4447 checks, 37
