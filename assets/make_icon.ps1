@@ -36,11 +36,19 @@ foreach ($size in $sizes) {
     $g.DrawLine($post, $size * 0.12, $size * 0.70, $size * 0.12, $size * 0.94)
     $g.DrawLine($post, $size * 0.88, $size * 0.70, $size * 0.88, $size * 0.94)
 
-    # Wordmark.
-    $fontSize = [Math]::Max(4.0, $size * 0.34)
-    $font = New-Object System.Drawing.Font("Arial Black", $fontSize,
-        [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+    # Wordmark: "DOR2" in championship gold, auto-fit so the "2" never clips.
     $text = "DOR2"
+    $fontSize = [Math]::Max(4.0, $size * 0.34)
+    $maxWidth = $size * 0.86
+    $font = $null
+    while ($true) {
+        $font = New-Object System.Drawing.Font("Arial Black", $fontSize,
+            [System.Drawing.FontStyle]::Bold, [System.Drawing.GraphicsUnit]::Pixel)
+        $measured = $g.MeasureString($text, $font)
+        if ($measured.Width -le $maxWidth -or $fontSize -le 4.0) { break }
+        $font.Dispose()
+        $fontSize *= 0.92
+    }
     $fmt = New-Object System.Drawing.StringFormat
     $fmt.Alignment = [System.Drawing.StringAlignment]::Center
     $fmt.LineAlignment = [System.Drawing.StringAlignment]::Center
@@ -50,7 +58,7 @@ foreach ($size in $sizes) {
         [single]1, [single]($size * 0.06 + 1), [single]$size, [single]($size * 0.56))
     $shadow = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(180, 0, 0, 0))
     $g.DrawString($text, $font, $shadow, $shadowRect, $fmt)
-    $brush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 244, 244, 246))
+    $brush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 232, 181, 58))
     $g.DrawString($text, $font, $brush, $textRect, $fmt)
 
     $ms = New-Object System.IO.MemoryStream
