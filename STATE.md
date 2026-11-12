@@ -102,21 +102,23 @@ Updated: 2026-11-11 (takeover completion pass; supersedes the scaffold-era STATE
 
 ## Release
 
-- Version: v0.1.0
+- Version: **v0.1.1** (current; supersedes v0.1.0)
 - Ship decision (user-approved 2026-11-11): **JIT default, static recomp opt-in
   (experimental)** due to the rare static-core heavy-mode corruption.
+- v0.1.1 adds: DOR2-themed launcher (parity with shared themed launchers) +
+  corrected, consistent DOR2 icon across all four exes.
 - Manifest: `docs\release\recomplauncher.json` (validates, 0 errors);
   `cpu_core=jit` in ensure/new; core setting relabeled JIT default / static experimental
-- Package: `dist\DOR2StaticRecomp-v0.1.0-Windows-x64\` + zip + `SHA256SUMS.txt`
-- Zip SHA-256 (JIT-default build, repo field set): `ce9166ce72e3f6f15ac7e3a55be60499cb973ab0878b83029bfcfef7fd11aeae`
-- Verified: expanded-zip hash/layout/icons/game-data-scan/schema(0 err);
-  staged DOR2Prepare (progress 1.000, DOL+CRC match); staged JIT boot 59.94 fps
-- Release notes: `dist\release-notes-v0.1.0.md`
-- Published: **yes** — https://github.com/Spaced1127/DOR2-Static-Recomp/releases/tag/v0.1.0
-  (user-approved commit + tag + publish 2026-11-11; commit 7f11135, tag v0.1.0)
+- Package: `dist\DOR2StaticRecomp-v0.1.1-Windows-x64\` + zip + `SHA256SUMS.txt`
+- Zip SHA-256 (v0.1.1): `090114b6146da145c22d4fa9ceda406630345f2e4c6b514b74c457cf520f4eb7`
+- Verified: expanded-zip hash/layout/icons(1 unique across 4 exes)/game-data-scan/
+  schema(0 err); staged DOR2Prepare (progress 1.000, DOL+CRC match); staged JIT boot 59.94 fps
+- Release notes: `dist\release-notes-v0.1.1.md`
+- Published: **yes** — https://github.com/Spaced1127/DOR2-Static-Recomp/releases/tag/v0.1.1
+  (user-approved; commit c31cb7f, tag v0.1.1). Prior: v0.1.0 (commit 7f11135).
 - `repo` field: `Spaced1127/DOR2-Static-Recomp`
-- Download-back verified: zip sha256 matches SHA256SUMS; recomplauncher.json at
-  top; icons present; game-data scan clean; schema 0 errors.
+- Download-back verified (v0.1.1): zip sha256 matches SHA256SUMS; recomplauncher.json
+  at top; identical DOR2 icon on all exes; game-data scan clean; schema 0 errors.
 - Source reproducibility: upstream submodule pins + `patches/moderngekko-settings.patch`
   applied via `scripts/apply-patches.ps1` (see REPRODUCE.md).
 - Compliance: savestates moved out of `docs\evidence` into `work\states`
