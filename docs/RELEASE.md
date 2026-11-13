@@ -6,15 +6,21 @@
 recomplauncher.json
 DOR2Recomp.exe
 DOR2RecompRunner.exe
-DOR2RecompRunnerCore.exe
-DOR2Prepare.exe
 gGW2E78_recomp.dll
+dor2_grid.png
+dor2_logo.png
 Sys/...
-LICENSE
+LICENSES/...
 README.txt
 PLAYERS.md
-Play.cmd
 ```
+
+The launcher (`DOR2Recomp.exe`) is the single entry point: open it, import the
+disc, change settings, click Play. Play starts the runner
+(`DOR2RecompRunner.exe`) directly. There is no `Play.cmd`, no separate
+"core" executable and no shim — the runner selects the CPU core itself from
+`--core jit|static`. `DOR2Prepare.exe` is a dev-only headless extractor and is
+not shipped; the RecompLauncher prepare step runs the launcher's `--extract`.
 
 No ISO/RVZ, DOL, FST, extracted `Game/` or `files/` tree, textures, audio,
 saves or cover art.
@@ -47,9 +53,12 @@ The package script:
   `check`.
 - `game.dumps` advertises the Redump USA size and CRC-32. `DOR2Prepare.exe`
   checks the disc ID and retail DOL hash during setup.
-- `prepare` runs headless and prints `progress 0..1` lines.
-- `start` runs `DOR2RecompRunner.exe` with the extracted game, module and user
-  directory.
+- `prepare` runs the launcher headless (`DOR2Recomp.exe --extract {game}`) and
+  prints `progress 0..1` lines. It extracts into `Game/` beside the executable
+  and records the path in `default-game.txt`.
+- `start` runs the single runner `DOR2RecompRunner.exe` with the module and user
+  directory; the game root is read from `default-game.txt`. The CPU core comes
+  from `config.ini` (`cpu_core`) or `--core`.
 - `settings` exposes CPU core, resolution, window mode, VSync and MSAA. There
   is no uncapped frame-rate option.
 - The `repo` field must be the final `owner/name` before publishing. It is a

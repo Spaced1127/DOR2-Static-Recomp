@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(DOR2Recomp VERSION 0.1.1 LANGUAGES C CXX RC)
+project(DOR2Recomp VERSION 0.1.2 LANGUAGES C CXX RC)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -19,7 +19,7 @@ set(MODERNGEKKO_FRONTEND_NAME
 set(MODERNGEKKO_LAUNCHER_OUTPUT_NAME
     "DOR2Recomp" CACHE STRING "" FORCE)
 set(MODERNGEKKO_RUNNER_OUTPUT_NAME
-    "DOR2RecompRunnerCore" CACHE STRING "" FORCE)
+    "DOR2RecompRunner" CACHE STRING "" FORCE)
 set(MODERNGEKKO_USER_DIRECTORY_NAME
     "DOR2Recomp" CACHE STRING "" FORCE)
 set(MODERNGEKKO_DEFAULT_WINDOW_TITLE
@@ -66,7 +66,7 @@ if(WIN32)
         target_sources(moderngekko-launcher PRIVATE assets/launcher.rc)
     endif()
     if(TARGET moderngekko-run)
-        target_sources(moderngekko-run PRIVATE assets/runner-core.rc)
+        target_sources(moderngekko-run PRIVATE assets/runner.rc)
     endif()
 
     # UTF-8 ANSI code page for every tool that touches the extracted game tree.
@@ -99,25 +99,9 @@ if(WIN32)
 endif()
 
 # ---------------------------------------------------------------------------
-# DOR2RecompRunner: user-facing runner with --core static|jit. It starts
-# DOR2RecompRunnerCore.exe after selecting the CPU core.
-# ---------------------------------------------------------------------------
-add_executable(DOR2RecompRunner src/runner-shim/main.cpp)
-target_compile_features(DOR2RecompRunner PRIVATE cxx_std_17)
-set_target_properties(DOR2RecompRunner PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${DOR2_RUNTIME_OUTPUT_DIR}"
-    OUTPUT_NAME "DOR2RecompRunner")
-if(MSVC)
-    target_compile_options(DOR2RecompRunner PRIVATE /W4 /utf-8 /EHsc)
-else()
-    target_compile_options(DOR2RecompRunner PRIVATE -Wall -Wextra)
-endif()
-if(WIN32)
-    target_sources(DOR2RecompRunner PRIVATE assets/runner.rc assets/app.manifest)
-endif()
-
-# ---------------------------------------------------------------------------
-# DOR2Prepare: headless ISO extractor for RecompLauncher's prepare step.
+# DOR2Prepare: headless ISO extractor used by the dev scripts (recompile.ps1).
+# Not shipped: the release's RecompLauncher prepare step runs the launcher
+# itself (DOR2Recomp.exe --extract), matching the shared launcher structure.
 # ---------------------------------------------------------------------------
 add_executable(DOR2Prepare src/prepare/main.cpp)
 target_compile_features(DOR2Prepare PRIVATE cxx_std_17)

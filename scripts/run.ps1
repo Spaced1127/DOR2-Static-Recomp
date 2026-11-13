@@ -24,7 +24,6 @@ $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $PSScriptRoot
 $Build = Join-Path $Root 'build\moderngekko'
 $Runner = Join-Path $Build 'DOR2RecompRunner.exe'
-$CoreRunner = Join-Path $Build 'DOR2RecompRunnerCore.exe'
 
 $Game = if ($Game) { $Game } else { Join-Path $Root 'work\game' }
 $UserDir = if ($UserDir) { $UserDir } else { Join-Path $Root 'work\user' }
@@ -33,7 +32,6 @@ if (-not $Module) {
 }
 
 if (-not (Test-Path $Runner)) { throw "Runner not built: $Runner. Run scripts\build.ps1." }
-if (-not (Test-Path $CoreRunner)) { throw "Runtime core not built: $CoreRunner." }
 if (-not (Test-Path (Join-Path $Game 'sys\main.dol'))) {
     throw "No extracted game at $Game. Run scripts\recompile.ps1 -Iso '<disc.iso>'."
 }
@@ -77,5 +75,9 @@ Write-Host ('[run] user=' + $UserDir)
 if ($Core -eq 'static') { Write-Host ('[run] module=' + $Module) }
 Write-Host ''
 
-& $Runner @runnerArgs
+# The single runner writes diagnostics to stderr. Capture them into the user
+# log (the launcher's Play path does the same); there is no shim tee anymore.
+$RunLog = Join-Path $UserDir 'Logs\ModernGekko.log'
+New-Item -ItemType Directory -Force -Path (Split-Path $RunLog) | Out-Null
+& $Runner @runnerArgs 2>&1 | Tee-Object -FilePath $RunLog
 exit $LASTEXITCODE

@@ -15,22 +15,18 @@
     ]
   },
   "prepare": {
-    "program": ["DOR2Prepare.exe"],
+    "program": ["DOR2Recomp.exe"],
     "args": [
-      "--input", "{game}",
-      "--output", "{install}/Game"
+      "--extract", "{game}"
     ],
     "label": "Extracting the game files from your disc",
-    "timeout": 1800
+    "timeout": 1200
   },
   "start": {
     "program": ["DOR2RecompRunner.exe"],
     "args": [
-      "--game", "{install}/Game",
       "--module", "{install}/gGW2E78_recomp.dll",
-      "--user-dir", "{local}/DOR2Recomp",
-      "--graphics", "Vulkan",
-      "--audio", "Cubeb"
+      "--user-dir", "{local}/DOR2Recomp"
     ]
   },
   "config": [

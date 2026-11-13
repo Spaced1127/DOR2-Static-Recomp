@@ -65,12 +65,11 @@ else {
 
 Write-Host '[build] compiling' -ForegroundColor Cyan
 Invoke-VsCommand $VcVars ('cmake --build "' + $Build + '" --target ' +
-    'moderngekko-run moderngekko-launcher moderngekko-port DOR2Prepare DOR2RecompRunner -j ' + $Jobs)
+    'moderngekko-run moderngekko-launcher moderngekko-port DOR2Prepare -j ' + $Jobs)
 
 $artifacts = @(
     'DOR2Recomp.exe',
     'DOR2RecompRunner.exe',
-    'DOR2RecompRunnerCore.exe',
     'DOR2Prepare.exe',
     'moderngekko-runtime\moderngekko-port.exe',
     'moderngekko-runtime\dolrecomp.exe'

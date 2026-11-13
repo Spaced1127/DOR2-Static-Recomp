@@ -57,5 +57,5 @@ while ((Get-Date) -lt $deadline -and -not $p.HasExited) {
     Start-Sleep -Milliseconds 500
 }
 'command=stop' | Set-Content (Join-Path $cmd 'zzzz_stop.txt') -Encoding ASCII
-if (-not $p.WaitForExit(30000)) { Stop-Process -Id $p.Id -Force; Get-CimInstance Win32_Process -Filter "Name='DOR2RecompRunnerCore.exe'" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } }
+if (-not $p.WaitForExit(30000)) { Stop-Process -Id $p.Id -Force; Get-CimInstance Win32_Process -Filter "Name='DOR2RecompRunner.exe'" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } }
 "[$Tag] core=$Core dumps=$((Get-ChildItem $dumps -Filter 'ram_*.bin').Count) expected=$($Steps+1)"

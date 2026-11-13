@@ -23,9 +23,7 @@ $Stage = Join-Path $OutRoot $Name
 
 $required = @(
     'DOR2Recomp.exe',
-    'DOR2RecompRunner.exe',
-    'DOR2RecompRunnerCore.exe',
-    'DOR2Prepare.exe'
+    'DOR2RecompRunner.exe'
 )
 foreach ($file in $required) {
     $path = Join-Path $Build $file
@@ -53,7 +51,13 @@ foreach ($file in $required) {
 Copy-Item $Module (Join-Path $Stage 'gGW2E78_recomp.dll') -Force
 Copy-Item $sys (Join-Path $Stage 'Sys') -Recurse -Force
 
-Copy-Item (Join-Path $Root 'LICENSE') (Join-Path $Stage 'LICENSE') -Force
+New-Item -ItemType Directory -Force -Path (Join-Path $Stage 'LICENSES') | Out-Null
+Copy-Item (Join-Path $Root 'LICENSE') `
+    (Join-Path $Stage 'LICENSES\DOR2Recomp-GPL-3.0.txt') -Force
+Copy-Item (Join-Path $Root 'lib\ModernGekko-Template\lib\ModernGekko\vendor\dolphin\COPYING') `
+    (Join-Path $Stage 'LICENSES\Dolphin-GPL-2.0.txt') -Force
+Copy-Item (Join-Path $Root 'lib\ModernGekko-Template\lib\DolRecomp\LICENSE') `
+    (Join-Path $Stage 'LICENSES\DolRecomp.txt') -Force
 Copy-Item (Join-Path $Root 'docs\release\README.txt') (Join-Path $Stage 'README.txt') -Force
 Copy-Item (Join-Path $Root 'docs\release\PLAYERS.md') (Join-Path $Stage 'PLAYERS.md') -Force
 Copy-Item (Join-Path $Root 'docs\release\recomplauncher.json') `
@@ -63,11 +67,6 @@ foreach ($art in @('dor2_grid.png', 'dor2_logo.png')) {
     $src = Join-Path $Root "assets\sgdb\$art"
     if (Test-Path $src) { Copy-Item $src (Join-Path $Stage $art) -Force }
 }
-
-@'
-@echo off
-start "" "%~dp0DOR2Recomp.exe"
-'@ | Set-Content -Path (Join-Path $Stage 'Play.cmd') -Encoding ASCII
 
 # --- game-data guard ---------------------------------------------------------
 $badExtensions = @('.iso', '.rvz', '.gcm', '.wbfs', '.gcz', '.dol', '.elf', '.rel',
