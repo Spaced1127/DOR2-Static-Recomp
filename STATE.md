@@ -1,6 +1,6 @@
 # STATE
 
-Updated: 2026-11-11 (takeover completion pass; supersedes the scaffold-era STATE)
+Updated: 2026-11-13 (v0.1.2 single-runner launcher parity release)
 
 ## Disc
 
@@ -30,8 +30,12 @@ Updated: 2026-11-11 (takeover completion pass; supersedes the scaffold-era STATE
   - `src/runtime/dolphin_runtime.cpp`: `Config::SetBase` wiring for the above,
     `[video]`/`[audio]` stderr lines, `cpu_core` fallback (env wins)
   - `tests/frontend_config_test.cpp`: round-trip + validation coverage
-- Project-owned: `src/runner-shim/main.cpp` tees runtime stderr into
-  `<user-dir>\Logs\ModernGekko.log` (recursive directory creation)
+- Project-owned: `src/runner-shim/main.cpp` is **deprecated/unused** as of
+  v0.1.2. The runner (`moderngekko-run` → `DOR2RecompRunner.exe`) now selects
+  the CPU core natively (`--core jit|static`), so no shim or separate
+  `DOR2RecompRunnerCore.exe` is built or shipped. The launcher's Play path
+  captures runner stderr into `<user-dir>\Logs\ModernGekko.log`; the dev
+  scripts (`run.ps1`, `work/verify-package.ps1`) capture it by redirection.
 - Runtime compiler: MSVC 19.51 (VS 2026 Build Tools)
 - Module compiler: Clang 22.1.8, `-march=x86-64-v3`, `-O3`, ThinLTO,
   loop budget 4096, call depth 128
@@ -102,23 +106,32 @@ Updated: 2026-11-11 (takeover completion pass; supersedes the scaffold-era STATE
 
 ## Release
 
-- Version: **v0.1.1** (current; supersedes v0.1.0)
+- Version: **v0.1.2** (current; supersedes v0.1.1)
 - Ship decision (user-approved 2026-11-11): **JIT default, static recomp opt-in
   (experimental)** due to the rare static-core heavy-mode corruption.
-- v0.1.1 adds: DOR2-themed launcher (parity with shared themed launchers) +
-  corrected, consistent DOR2 icon across all four exes.
+- v0.1.2 adds: **single-runner launcher parity** with the shared launcher —
+  one launcher (`DOR2Recomp.exe`) + one runner (`DOR2RecompRunner.exe`, native
+  `--core`); removed the runner-shim + `DOR2RecompRunnerCore.exe` pair and
+  `Play.cmd`; RecompLauncher prepare now runs the launcher headless
+  (`--extract`) instead of `DOR2Prepare.exe`; licenses in `LICENSES/`. Plus the
+  SB-parity themed UI, SteamGridDB cover/logo/icon (user-approved), resize-safe
+  SDL background, card/sidebar text margins, and a UTF-8 `git apply`-able patch.
 - Manifest: `docs\release\recomplauncher.json` (validates, 0 errors);
-  `cpu_core=jit` in ensure/new; core setting relabeled JIT default / static experimental
-- Package: `dist\DOR2StaticRecomp-v0.1.1-Windows-x64\` + zip + `SHA256SUMS.txt`
-- Zip SHA-256 (v0.1.1): `090114b6146da145c22d4fa9ceda406630345f2e4c6b514b74c457cf520f4eb7`
-- Verified: expanded-zip hash/layout/icons(1 unique across 4 exes)/game-data-scan/
-  schema(0 err); staged DOR2Prepare (progress 1.000, DOL+CRC match); staged JIT boot 59.94 fps
-- Release notes: `dist\release-notes-v0.1.1.md`
-- Published: **yes** — https://github.com/Spaced1127/DOR2-Static-Recomp/releases/tag/v0.1.1
-  (user-approved; commit c31cb7f, tag v0.1.1). Prior: v0.1.0 (commit 7f11135).
+  `prepare` = `DOR2Recomp.exe --extract {game}`; `start` = single runner with
+  `--module`/`--user-dir`; `cpu_core=jit` in ensure/new
+- Package: `dist\DOR2StaticRecomp-v0.1.2-Windows-x64\` + zip + `SHA256SUMS.txt`
+- Zip SHA-256 (v0.1.2): `ae0b0d063de25a5ae1a4b224078c3ba128d0236854d1714a740dfa6261d75a3c`
+- Verified: expanded-zip hash/layout/icons(both exes)/game-data-scan/schema(0 err);
+  staged launcher `--extract` (progress 1.000); staged single-runner JIT boot
+  59.9402 fps / vps 59.9402 / speed 1; static `fallback=0`/`smc_failed=0`;
+  launcher `--play` spawns the runner directly.
+- Release notes: `dist\release-notes-v0.1.2.md`
+- Published: **yes** — https://github.com/Spaced1127/DOR2-Static-Recomp/releases/tag/v0.1.2
+  (user-approved; commit 1b5585f, tag v0.1.2). Prior: v0.1.1 (c31cb7f), v0.1.0 (7f11135).
 - `repo` field: `Spaced1127/DOR2-Static-Recomp`
-- Download-back verified (v0.1.1): zip sha256 matches SHA256SUMS; recomplauncher.json
-  at top; identical DOR2 icon on all exes; game-data scan clean; schema 0 errors.
+- Download-back verified (v0.1.2): zip sha256 matches SHA256SUMS; recomplauncher.json
+  at top; parity layout (no Play.cmd/RunnerCore/Prepare); identical DOR2 icon on
+  both exes; game-data scan clean; schema 0 errors.
 - Source reproducibility: upstream submodule pins + `patches/moderngekko-settings.patch`
   applied via `scripts/apply-patches.ps1` (see REPRODUCE.md).
 - Compliance: savestates moved out of `docs\evidence` into `work\states`
@@ -133,6 +146,8 @@ Updated: 2026-11-11 (takeover completion pass; supersedes the scaffold-era STATE
   branding, first boot evidence. Takeover added: settings implementation,
   log tee, compliance fixes, verification matrix, this STATE.
 - The launcher captures runner stderr into `<user>\Logs\ModernGekko.log`
-  itself (exclusive handle while running); the shim tee covers Play.cmd /
-  RecompLauncher paths.
+  itself (exclusive handle while running). As of v0.1.2 there is no shim: the
+  single runner writes diagnostics to stderr, and the dev scripts capture them
+  by redirection. Direct RecompLauncher launches rely on the launcher's Logs
+  action / Dolphin's own log, matching the shared launcher.
 - No clean builds: keep `build\moderngekko` and the module cache between runs.
