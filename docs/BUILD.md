@@ -64,11 +64,16 @@ the top-level `CMakeLists.txt` before the runtime subdirectory is added.
 ## 3. Prepare the disc
 
 The shipped extractor validates the retail dump and writes the layout the
-runtime expects:
+runtime expects. It accepts a raw **.iso or a Dolphin .rvz directly** — RVZ is
+decoded natively, with no manual RVZ-to-ISO conversion:
 
 ```powershell
 build\moderngekko\DOR2Prepare.exe `
   --input "D:\dumps\WWE Day of Reckoning 2 (USA).iso" `
+  --output work\game
+# an RVZ uses the same command:
+build\moderngekko\DOR2Prepare.exe `
+  --input "D:\dumps\WWE Day of Reckoning 2 (USA).rvz" `
   --output work\game
 ```
 
@@ -79,9 +84,11 @@ progress 1.000 Extraction complete
 DOR2PREPARE: disc_id=GW2E78 title="WWE Day of Reckoning 2" dol_sha256=e47abf... iso_crc32=bb092c3a
 ```
 
-If the dump is RVZ, convert it first (the release manifest asks for ISO):
+For RVZ, `DOR2Prepare` delegates to `tools/rvz_extract.py` (Python + `zstandard`).
+That tool also extracts directly, and the legacy RVZ->ISO form still works:
 
 ```powershell
+python tools\rvz_extract.py --input "WWE Day of Reckoning 2 (USA).rvz" --output work\game
 python tools\rvz_extract.py "WWE Day of Reckoning 2 (USA).rvz" work\disc\game.iso
 ```
 

@@ -37,7 +37,7 @@ dumped disc image. The launcher extracts it locally; nothing is uploaded.
 - LLVM/Clang on `PATH` (`C:\Program Files\LLVM\bin`)
 - CMake 3.24+ and Ninja
 - Python 3 (only for the helper scripts)
-- Your own USA disc image (`WWE Day of Reckoning 2 (USA).iso`)
+- Your own USA disc image (`WWE Day of Reckoning 2 (USA).iso` or `.rvz`)
 
 ## Build
 

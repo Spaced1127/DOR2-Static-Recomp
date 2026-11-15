@@ -12,8 +12,14 @@ Updated: 2026-11-13 (v0.1.2 single-runner launcher parity release)
 - Boot DOL SHA-256: `e47abf73e2c7162098c01de34b90ab66031c3f161fd72b36dde0173ea4af3610`
 - Entry point: `0x80003154`
 - FST: 3,400 files, 1,273,577,729 bytes
-- Local dump: `WWE Day of Reckoning 2 (USA).rvz` (git-ignored); converted ISO at
-  `work\disc\dor2.iso`
+- Local dump: `WWE Day of Reckoning 2 (USA).rvz` (git-ignored); ISO at
+  `work\disc\dor2.iso`. **Native RVZ support** (no manual conversion): the
+  launcher picker + DiscIO extractor accept `.rvz`; `tools/rvz_extract.py`
+  (zstandard, reused from the guide) decodes RVZ directly to `sys/`+`files/`;
+  `DOR2Prepare.exe` detects `RVZ\x01` and delegates to it; `recompile.ps1 -Iso`
+  accepts `.rvz`. Acceptance (RVZ path vs ISO path): 3405 files, 0 mismatches,
+  identical aggregate tree SHA-256 `cba194579c752a7d177d8cdbb0d065cc61283bf74b443a2158a6fc3273da972f`;
+  `main.dol` `e47abf73…`, `fst.bin` `a0a279f7…`, reconstructed ISO CRC `bb092c3a`.
 
 ## Build
 

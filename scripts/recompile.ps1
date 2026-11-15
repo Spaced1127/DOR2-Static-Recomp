@@ -2,7 +2,11 @@
 #
 # Usage:
 #   scripts\recompile.ps1 -Iso "D:\dumps\WWE Day of Reckoning 2 (USA).iso"
+#   scripts\recompile.ps1 -Iso "D:\dumps\WWE Day of Reckoning 2 (USA).rvz"
 #   scripts\recompile.ps1                      # reuse work\game
+#
+# -Iso accepts a raw .iso or a Dolphin .rvz (decoded natively, no manual
+# conversion). RVZ is handled by tools/rvz_extract.py via DOR2Prepare.
 #
 # Module builds happen under a short path (default C:\d2modules) because the
 # generated chunk object paths exceed MSVC/CMake limits under long folders
@@ -53,7 +57,7 @@ if (-not $Prepare -or -not $Port) {
 
 # --- extract -----------------------------------------------------------------
 if ($Iso) {
-    if (-not (Test-Path $Iso)) { throw "ISO not found: $Iso" }
+    if (-not (Test-Path $Iso)) { throw "disc image not found: $Iso" }
     Write-Host '[recompile] extracting the disc' -ForegroundColor Cyan
     $prepareArgs = @('--input', $Iso, '--output', $Game)
     if ($Force) { $prepareArgs += '--force' }
@@ -61,7 +65,7 @@ if ($Iso) {
     if ($LASTEXITCODE -ne 0) { throw "DOR2Prepare failed with exit code $LASTEXITCODE" }
 }
 elseif (-not (Test-Path (Join-Path $Game 'sys\main.dol'))) {
-    throw "No extracted game at $Game. Pass -Iso '<disc.iso>' the first time."
+    throw "No extracted game at $Game. Pass -Iso '<disc.iso|disc.rvz>' the first time."
 }
 
 # --- module ------------------------------------------------------------------

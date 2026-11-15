@@ -500,7 +500,7 @@ void PrintUsage()
   std::cout
       << "DOR2Prepare " << kVersion << " - WWE Day of Reckoning 2 disc extractor\n\n"
       << "Usage:\n"
-      << "  DOR2Prepare --input <disc.iso|extracted-folder> [--output <folder>]\n"
+      << "  DOR2Prepare --input <disc.iso|disc.rvz|extracted-folder> [--output <folder>]\n"
       << "              [--expect-id GW2E78] [--expect-dol <sha256>]\n"
       << "              [--force] [--no-dol-check]\n\n"
       << "Prints RecompLauncher progress lines on stdout. Exit codes:\n"
@@ -923,6 +923,60 @@ int PrepareFromIso(const Options& options)
   return 0;
 }
 
+// RVZ (Dolphin compressed disc) is detected by its "RVZ\x01" magic and decoded
+// by the self-contained tools/rvz_extract.py (zstandard), reused from the
+// GameCube-Static-Recomp-Guide. No manual RVZ->ISO conversion is required.
+bool IsRvz(const fs::path& input)
+{
+  std::ifstream file(input, std::ios::binary);
+  char magic[4] = {};
+  file.read(magic, 4);
+  return file.gcount() == 4 && magic[0] == 'R' && magic[1] == 'V' &&
+         magic[2] == 'Z' && magic[3] == '\x01';
+}
+
+int PrepareFromRvz(const Options& options)
+{
+  const fs::path exe_dir = ExecutableDirectory();
+  std::error_code ec;
+  // build/moderngekko/DOR2Prepare.exe -> <repo>/tools/rvz_extract.py
+  fs::path tool = fs::weakly_canonical(exe_dir / ".." / ".." / "tools" / "rvz_extract.py", ec);
+  if (ec || !fs::is_regular_file(tool, ec))
+    tool = exe_dir / "tools" / "rvz_extract.py";
+  if (!fs::is_regular_file(tool, ec))
+    return Fail("RVZ input needs tools/rvz_extract.py (not found in the project)", 1);
+
+  // The python child runs with cwd=exe_dir, so pass absolute paths (resolved
+  // against this process's cwd) for the input image and output folder.
+  const fs::path input_abs = fs::absolute(options.input);
+  const fs::path output_abs = fs::absolute(options.output);
+  std::wstring cmd = L"python \"" + tool.wstring() + L"\" --input \"" +
+                     input_abs.wstring() + L"\" --output \"" +
+                     output_abs.wstring() + L"\" --expect-id " +
+                     std::wstring(options.expect_id.begin(), options.expect_id.end());
+  if (options.no_dol_check)
+    cmd += L" --no-dol-check";
+  else
+    cmd += L" --expect-dol " +
+           std::wstring(options.expect_dol.begin(), options.expect_dol.end());
+
+  Progress(0.0, "Decoding RVZ via tools/rvz_extract.py");
+  STARTUPINFOW startup{};
+  startup.cb = sizeof(startup);
+  PROCESS_INFORMATION process{};
+  std::vector<wchar_t> mutable_cmd(cmd.begin(), cmd.end());
+  mutable_cmd.push_back(L'\0');
+  if (!CreateProcessW(nullptr, mutable_cmd.data(), nullptr, nullptr, TRUE, 0, nullptr,
+                      exe_dir.c_str(), &startup, &process))
+    return Fail("cannot start python for RVZ extraction (is Python on PATH?)", 1);
+  WaitForSingleObject(process.hProcess, INFINITE);
+  DWORD exit_code = 1;
+  GetExitCodeProcess(process.hProcess, &exit_code);
+  CloseHandle(process.hThread);
+  CloseHandle(process.hProcess);
+  return static_cast<int>(exit_code);
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -971,5 +1025,7 @@ int main(int argc, char** argv)
     }
   }
 
+  if (IsRvz(options->input))
+    return PrepareFromRvz(*options);
   return PrepareFromIso(*options);
 }

@@ -7,7 +7,7 @@ These scripts are diagnostic helpers copied from the
 | Tool | Purpose |
 | --- | --- |
 | `gcdisc.py` | Inspect a GameCube ISO, list/extract the FST, dump DOL sections |
-| `rvz_extract.py` | Convert a GameCube RVZ to ISO (Zstd/none/padding) |
+| `rvz_extract.py` | Decode a GameCube RVZ natively (Zstd/none/padding): extract `sys/`+`files/` directly, or reconstruct an ISO |
 | `verify_dol.py` | Compare every `main.dol` copy against the disc |
 | `dol_disasm.py` | Disassemble a DOL at a virtual address (Capstone) |
 | `validate_manifest.py` | Validate a RecompLauncher manifest against the schema |
@@ -15,6 +15,10 @@ These scripts are diagnostic helpers copied from the
 ## Examples
 
 ```powershell
+# Native RVZ -> extracted game (no manual ISO conversion); same files as the ISO path
+python tools\rvz_extract.py --input "WWE Day of Reckoning 2 (USA).rvz" --output work\game
+
+# Legacy RVZ -> ISO form (still supported)
 python tools\rvz_extract.py "WWE Day of Reckoning 2 (USA).rvz" work\disc\game.iso
 python tools\gcdisc.py info work\disc\game.iso
 python tools\gcdisc.py list work\disc\game.iso sound
@@ -26,5 +30,7 @@ python tools\validate_manifest.py docs\recomplauncher.schema.json `
 Requirements: Python 3, `zstandard` for RVZ, `jsonschema` for manifests,
 `capstone` for disassembly.
 
-The shipped `DOR2Prepare.exe` implements the production extraction path in
-native C++ and does not require Python at play time.
+The shipped launcher (`DOR2Recomp.exe`) extracts ISO **and RVZ** natively via
+Dolphin's DiscIO (no Python at play time). The dev extractor `DOR2Prepare.exe`
+handles ISO in native C++ and delegates RVZ to `tools/rvz_extract.py`, so
+`scripts\recompile.ps1 -Iso <disc.rvz>` works with no manual conversion.

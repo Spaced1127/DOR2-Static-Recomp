@@ -11,9 +11,13 @@ game files you supply.
 WHAT YOU NEED
 -------------
 An original GameCube copy of "WWE Day of Reckoning 2" (USA, disc ID GW2E78),
-as a .iso image (1,459,978,240 bytes, clean 1:1 Redump dump, CRC-32 bb092c3a).
+as either:
 
-The disc is imported by this app. Other regions and other games are rejected.
+  * a .iso image (1,459,978,240 bytes, clean 1:1 Redump dump, CRC-32 bb092c3a), or
+  * a .rvz image (Dolphin compressed format).
+
+Both are imported by this app directly — there is NO manual RVZ-to-ISO
+conversion step. Other regions and other games are rejected.
 
 
 QUICK START

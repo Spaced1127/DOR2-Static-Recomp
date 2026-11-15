@@ -1,5 +1,12 @@
 # Players guide
 
+## Disc images
+
+The launcher imports a **.iso or a Dolphin .rvz** directly (the file picker
+lists both, plus .wbfs). RVZ is decoded natively — no manual conversion to ISO
+is needed. The extract verifies the disc ID (`GW2E78`) and the retail DOL hash
+before anything runs, and an RVZ produces exactly the same files as the ISO.
+
 ## Default controller layout
 
 Controller support is built into the game itself: on every boot the runner
