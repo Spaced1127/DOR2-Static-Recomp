@@ -55,6 +55,13 @@ Updated: 2026-11-13 (v0.1.2 single-runner launcher parity release)
   show_fps_in_title, msaa, ssaa, anisotropy, vsync, efb_access, aspect,
   widescreen_hack, mute, volume, emulation_speed (clamped to 1.0), cpu_core
 - User directory: `work\user*` for local tests, `{local}\DOR2Recomp` in releases
+- Controllers: **baked into the runner** (no launcher picker needed, works via
+  RecompLauncher). `EnsureDefaultControllerConfig` detects connected SDL pads
+  every boot, logs the family (Xbox/PlayStation/Switch/generic), and keeps a
+  matching `GCPadNew.ini` or regenerates it when the configured pad is gone
+  (pad-swap safe). Position-consistent SDL mapping; up to 4 ports. Verified with
+  an Xbox One pad: fresh generate, adapt (disconnected DualSense profile ->
+  Xbox), keep (matching profile preserved); booted 59.94.
 - Target: 59.94 Hz (GameCube VI)
 
 ## Evidence (measured 2026-11-11, reference scene = mid-match savestate)

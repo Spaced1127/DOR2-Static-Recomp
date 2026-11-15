@@ -2,25 +2,36 @@
 
 ## Default controller layout
 
-The runtime creates a GameCube pad profile for the first detected gamepad. The
-standard mapping is:
+Controller support is built into the game itself: on every boot the runner
+detects the connected pad(s) — **Xbox, PlayStation (DualSense/DualShock),
+Nintendo Switch Pro, or any generic SDL gamepad** — and writes a GameCube pad
+profile automatically. This works even when you launch through RecompLauncher
+(which has no controller picker). If you swap controllers, the profile is
+regenerated for the new pad on the next boot; a profile for a pad that is still
+connected is left untouched. Up to four pads map to ports 1-4.
 
-| GameCube | Xbox | PlayStation | Keyboard |
-| --- | --- | --- | --- |
-| A | A | Cross | X |
-| B | B | Circle | Z |
-| X | X | Square | C |
-| Y | Y | Triangle | V |
-| Start | Menu | Options | Enter |
-| D-pad | D-pad | D-pad | Arrow keys |
-| Control stick | Left stick | Left stick | WASD |
-| C-stick | Right stick | Right stick | IJKL |
-| L | LB | L1 | Q |
-| R | RB | R1 | E |
-| Z | LT | L2 | Shift |
+The mapping is position-consistent across pads (A = bottom, B = right, X = left,
+Y = top):
 
-If your pad is not detected, open `DOR2Recomp.exe`, choose a controller, and
-save. The profile is written to the runtime's user folder under
+| GameCube | Xbox | PlayStation | Switch Pro | Keyboard |
+| --- | --- | --- | --- | --- |
+| A | A | Cross | B | X |
+| B | B | Circle | A | Z |
+| X | X | Square | Y | C |
+| Y | Y | Triangle | X | V |
+| Start | Menu | Options | + | Enter |
+| D-pad | D-pad | D-pad | D-pad | Arrow keys |
+| Control stick | Left stick | Left stick | Left stick | WASD |
+| C-stick | Right stick | Right stick | Right stick | IJKL |
+| L | LB | L1 | L | Q |
+| R | RB | R1 | R | E |
+| Z | LT | L2 | ZL | Shift |
+
+(The Switch column uses Nintendo's button labels; the physical positions match
+Xbox/PlayStation.)
+
+To override the automatic choice, open `DOR2Recomp.exe`, choose a controller,
+and save. The profile is written to the runtime's user folder under
 `Config\GCPadNew.ini`.
 
 ## Menus

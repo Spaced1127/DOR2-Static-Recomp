@@ -2176,56 +2176,128 @@ index 7699c3d..456dff8 100644
      }
    }
 diff --git a/tools/moderngekko_run.cpp b/tools/moderngekko_run.cpp
-index d6b3569..5d83dd2 100644
+index d6b3569..b826246 100644
 --- a/tools/moderngekko_run.cpp
 +++ b/tools/moderngekko_run.cpp
-@@ -7,6 +7,8 @@
+@@ -7,6 +7,10 @@
  
  #include "Common/StringUtil.h"
  
 +#include <SDL3/SDL.h>
 +
++#include <algorithm>
++#include <cctype>
  #include <charconv>
  #include <chrono>
  #include <csignal>
-@@ -41,11 +43,48 @@ volatile std::sig_atomic_t s_stop_requested = 0;
+@@ -17,6 +21,7 @@
+ #include <iostream>
+ #include <string>
+ #include <thread>
++#include <unordered_map>
+ #include <vector>
+ 
+ #if defined(_WIN32)
+@@ -41,11 +46,110 @@ volatile std::sig_atomic_t s_stop_requested = 0;
  
  void HandleStopSignal(int) { s_stop_requested = 1; }
  
 +// A fresh RecompLauncher install never opens the custom launcher, so no
-+// GCPadNew.ini exists. Detect the first SDL gamepad once and generate the same
-+// profile the launcher would have made.
++// GCPadNew.ini exists and the player cannot pick a pad there. Detect the
++// connected SDL gamepads on every boot and keep a working profile: generate one
++// when absent, and regenerate when the configured pad is no longer connected so
++// swapping Xbox / PlayStation / Switch / generic pads just works. The mapping
++// uses SDL's normalized buttons, which are position-consistent across families
++// (A=bottom, B=right, X=left, Y=top).
++const char *ControllerFamily(const std::string &name) {
++  std::string lower;
++  lower.reserve(name.size());
++  for (char c : name)
++    lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
++  const auto has = [&lower](const char *needle) {
++    return lower.find(needle) != std::string::npos;
++  };
++  if (has("xbox") || has("xinput") || has("microsoft"))
++    return "Xbox";
++  if (has("dualsense") || has("dualshock") || has("playstation") || has("ps5") ||
++      has("ps4") || has("sony"))
++    return "PlayStation";
++  if (has("switch") || has("pro controller") || has("joy-con") || has("nintendo"))
++    return "Switch";
++  return "generic";
++}
++
++// "SDL/<index>/<name>" -> "<name>" so matching ignores the SDL device index.
++std::string ControllerDeviceName(const std::string &device) {
++  const std::size_t first = device.find('/');
++  if (first == std::string::npos)
++    return device;
++  const std::size_t second = device.find('/', first + 1);
++  if (second == std::string::npos)
++    return device.substr(first + 1);
++  return device.substr(second + 1);
++}
++
 +void EnsureDefaultControllerConfig(const std::filesystem::path &user_directory) {
-+  if (moderngekko::frontend::ControllerConfigExists(user_directory))
-+    return;
 +  if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
 +    std::cerr << "controller: SDL init failed: " << SDL_GetError() << '\n';
 +    return;
 +  }
 +
++  // Enumerate connected gamepads, mirroring the launcher's device-string format.
++  std::vector<std::string> devices;
++  std::vector<std::string> names;
++  std::unordered_map<std::string, int> seen;
 +  int count = 0;
 +  SDL_JoystickID *ids = SDL_GetJoysticks(&count);
-+  std::cerr << "controller: " << count << " SDL joystick(s) detected\n";
-+  std::string device;
 +  if (ids) {
 +    for (int i = 0; i < count; ++i) {
 +      if (!SDL_IsGamepad(ids[i]))
 +        continue;
 +      const char *name = SDL_GetGamepadNameForID(ids[i]);
-+      if (name && *name) {
-+        device = "SDL/0/" + std::string(name);
-+        break;
-+      }
++      const std::string label = name && *name ? name : "Unknown Controller";
++      const int index = seen[label]++;
++      devices.push_back("SDL/" + std::to_string(index) + "/" + label);
++      names.push_back(label);
 +    }
 +  }
 +  SDL_free(ids);
 +
-+  if (!device.empty()) {
-+    std::string message;
-+    if (moderngekko::frontend::GenerateControllerConfig(user_directory, device,
-+                                                         &message))
-+      std::cerr << "controller configuration: " << message << '\n';
++  if (devices.empty()) {
++    std::cerr << "controller: no SDL gamepad detected\n";
++    SDL_Quit();
++    return;
 +  }
++  for (const std::string &name : names)
++    std::cerr << "controller: " << ControllerFamily(name) << " gamepad: " << name
++              << '\n';
++
++  // Keep an existing profile whose pads are still connected (respect a deliberate
++  // launcher choice). Match by name so a changed SDL index does not force a rewrite.
++  const auto configured =
++      moderngekko::frontend::ReadConfiguredControllers(user_directory);
++  bool profile_matches = !configured.empty();
++  for (const std::string &device : configured) {
++    const std::string want = ControllerDeviceName(device);
++    if (std::find(names.begin(), names.end(), want) == names.end()) {
++      profile_matches = false;
++      break;
++    }
++  }
++  if (profile_matches) {
++    std::cerr << "controller: keeping existing profile for " << configured.front()
++              << '\n';
++    SDL_Quit();
++    return;
++  }
++
++  // (Re)generate for the connected pads (up to four ports).
++  if (devices.size() > 4)
++    devices.resize(4);
++  std::string message;
++  if (moderngekko::frontend::GenerateControllerConfig(user_directory, devices,
++                                                       &message))
++    std::cerr << "controller configuration: " << message << '\n';
 +  SDL_Quit();
 +}
 +
@@ -2238,7 +2310,7 @@ index d6b3569..5d83dd2 100644
                 "       [--mods <directory>] [--no-mods]\n"
                 "       [--wayland] [-X11] [--headless] [--allow-interpreter]\n"
                 "       [--netplay-host | --netplay-join <host>] "
-@@ -141,6 +180,7 @@ int RunMain(int argc, char **argv) {
+@@ -141,6 +245,7 @@ int RunMain(int argc, char **argv) {
    config.window_title = MODERNGEKKO_DEFAULT_WINDOW_TITLE;
  #endif
    std::filesystem::path module_path;
@@ -2246,7 +2318,7 @@ index d6b3569..5d83dd2 100644
    bool use_default_mods = true;
    std::optional<moderngekko::frontend::NetplayRole> netplay_role;
    std::string netplay_address;
-@@ -161,7 +201,14 @@ int RunMain(int argc, char **argv) {
+@@ -161,7 +266,14 @@ int RunMain(int argc, char **argv) {
        config.game_root = value("--game");
      else if (arg == "--module")
        module_path = value("--module");
@@ -2262,7 +2334,7 @@ index d6b3569..5d83dd2 100644
        config.user_directory = value("--user-dir");
      else if (arg == "--title")
        config.window_title = value("--title");
-@@ -245,16 +292,47 @@ int RunMain(int argc, char **argv) {
+@@ -245,16 +357,47 @@ int RunMain(int argc, char **argv) {
      std::cerr << "invalid config.ini: " << frontend_config.error << '\n';
      return 2;
    }
@@ -2310,7 +2382,7 @@ index d6b3569..5d83dd2 100644
    if (!netplay_role && !frontend_config.controller.empty()) {
      std::string controller_message;
      if (!moderngekko::frontend::EnsureControllerConfig(
-@@ -314,7 +392,9 @@ int RunMain(int argc, char **argv) {
+@@ -314,7 +457,9 @@ int RunMain(int argc, char **argv) {
  #endif
  
    // Compatibility discovery belongs to the runner, never the runtime library.
@@ -2321,7 +2393,7 @@ index d6b3569..5d83dd2 100644
      if (const char *env = std::getenv("STATICRECOMP_MODULE"))
        module_path = env;
      else {
-@@ -329,7 +409,7 @@ int RunMain(int argc, char **argv) {
+@@ -329,7 +474,7 @@ int RunMain(int argc, char **argv) {
          module_path = user_module;
      }
    }
@@ -2330,7 +2402,7 @@ index d6b3569..5d83dd2 100644
      config.module =
          moderngekko::ModuleSource::DynamicPath(std::move(module_path));
  
-@@ -458,6 +538,8 @@ void PinProcessToLargestCache() {
+@@ -458,6 +603,8 @@ void PinProcessToLargestCache() {
  int main(int argc, char **argv) {
    try {
  #if defined(_WIN32)
