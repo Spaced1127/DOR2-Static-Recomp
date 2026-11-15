@@ -11,6 +11,7 @@ These scripts are diagnostic helpers copied from the
 | `verify_dol.py` | Compare every `main.dol` copy against the disc |
 | `dol_disasm.py` | Disassemble a DOL at a virtual address (Capstone) |
 | `validate_manifest.py` | Validate a RecompLauncher manifest against the schema |
+| `test_controller_layouts.py` | Offline proof that Edge/Elite/standard GUIDs map to standard-equivalent GameCube layouts |
 
 ## Examples
 

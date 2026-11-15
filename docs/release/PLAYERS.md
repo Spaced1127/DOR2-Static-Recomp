@@ -37,9 +37,58 @@ Y = top):
 (The Switch column uses Nintendo's button labels; the physical positions match
 Xbox/PlayStation.)
 
-To override the automatic choice, open `DOR2Recomp.exe`, choose a controller,
-and save. The profile is written to the runtime's user folder under
-`Config\GCPadNew.ini`.
+### Pro controllers (DualSense Edge, Xbox Elite Series 1 & 2)
+
+These work with the **same layout as a standard DualSense / Xbox pad**. Detection
+is by USB GUID (SDL's gamecontroller database), not the device name:
+
+| Device | VID:PID | GUID prefix (USB / Bluetooth) |
+| --- | --- | --- |
+| DualSense Edge | 054C:0DF2 | `030000004c050000f20d…` / `050000004c050000f20d…` |
+| Xbox Elite Series 1 | 045E:02E3 | `030000005e040000e302…` |
+| Xbox Elite Series 2 | 045E:0B00 / 0B05 | `050000005e040000000b…` / `…050b…` |
+
+The Edge's back paddles / Fn buttons and the Elite's paddles are extra buttons
+with no GameCube equivalent, so they are **explicitly ignored** (not bound to any
+control). Face buttons, sticks, triggers, shoulders and the D-pad behave exactly
+like the standard pad.
+
+### 8BitDo pads (Nintendo layout fix)
+
+8BitDo pads in **Nintendo layout** (Pro 2 / SN30 / SF30 / N30, and Switch-mode)
+report their face buttons swapped relative to Xbox. The runner reads the **live
+SDL binding per GUID** and, when `a`/`b` are Nintendo-style, generates a Nintendo
+profile (A/B and X/Y swapped) so the buttons match the printed labels. This is
+**not** a blanket 8BitDo rule: the **Ultimate** and **64** families report a
+standard layout and stay standard. A firmware that reports a reversed D-pad
+left/right is corrected automatically.
+
+### Checking your pad
+
+Run `DOR2RecompRunner.exe --list-controllers` (no game starts). It prints one
+diagnostic line per pad, also written to `Logs\ModernGekko.log` at game startup:
+
+```
+controller: name="<device>" guid=<32-hex> vid=<vid> pid=<pid> layout=<auto|standard|nintendo|keyboard> dpad=<normal|swapped>
+controller:   sdl_mapping=<SDL binding string>
+```
+
+If a pad is not detected or maps incorrectly, send that line (name + GUID +
+`sdl_mapping`) so the exact GUID variant can be handled.
+
+### Manual layout override
+
+To force a layout instead of auto-detect:
+
+- **Launcher:** CONTROLLER page -> "Button layout" -> Auto-detect / Standard
+  (Xbox / PS) / Nintendo (A/B swap).
+- **Config:** set `controller_layout=nintendo` (or `standard`/`auto`) in
+  `%LOCALAPPDATA%\DOR2Recomp\config.ini`.
+- **CLI:** `DOR2RecompRunner.exe --controller-layout nintendo` (aliases:
+  `switch`->nintendo, `xbox`/`playstation`->standard).
+
+A forced layout regenerates the profile; a hand-edited (custom)
+`Config\GCPadNew.ini` is preserved unless the device changes.
 
 ## Menus
 

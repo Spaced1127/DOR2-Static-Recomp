@@ -1,3 +1,18 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index c0548a0..c1b6b32 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -669,6 +669,10 @@ if(BUILD_TESTING)
+     target_include_directories(moderngekko_frontend_config_test PRIVATE
+         "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+     target_compile_features(moderngekko_frontend_config_test PRIVATE cxx_std_23)
++    if(MODERNGEKKO_GAMECUBE_CONTROLLERS)
++        target_compile_definitions(moderngekko_frontend_config_test PRIVATE
++            MODERNGEKKO_GAMECUBE_CONTROLLERS=1)
++    endif()
+     add_test(NAME moderngekko.frontend_config COMMAND moderngekko_frontend_config_test)
+ 
+     # Header-only, so the test needs no companion translation unit.
 diff --git a/include/moderngekko/runtime.hpp b/include/moderngekko/runtime.hpp
 index 0adc855..6c2f92d 100644
 --- a/include/moderngekko/runtime.hpp
@@ -156,11 +171,120 @@ index f9b5405..b3ffdb2 100644
    auto &jit = Core::System::GetInstance().GetJitInterface();
    StaticRecompModuleSource recomp_source;
    if (impl->config.module.kind == ModuleSource::Kind::DynamicPath)
+diff --git a/tests/frontend_config_test.cpp b/tests/frontend_config_test.cpp
+index 6bb9e0e..876e03d 100644
+--- a/tests/frontend_config_test.cpp
++++ b/tests/frontend_config_test.cpp
+@@ -138,6 +138,104 @@ int main() {
+                                  directory) != "SDL/9/Custom Controller")
+     return 12;
+ 
++  // --- 8BitDo / pro-controller layout fix (mirrors the WMX8 root cause) ---
++  using moderngekko::frontend::ControllerLayout;
++  using moderngekko::frontend::ControllerMapping;
++  using moderngekko::frontend::DetectControllerMapping;
++  using moderngekko::frontend::GenerateControllerConfig;
++  using moderngekko::frontend::ControllerProfileIsDefault;
++  using moderngekko::frontend::ControllerProfileDpadSwapped;
++
++  const std::string pro2_guid = "03000000c82d00000660000011010000";
++  // Pro 2 Nintendo layout: a:b1,b:b0 (a>b) -> Nintendo, hat dpad left/right correct.
++  ControllerMapping m = DetectControllerMapping(
++      "SDL/0/8BitDo Pro 2",
++      "a:b1,b:b0,x:b4,y:b3,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,"
++      "leftx:a0,lefty:a1,rightx:a2,righty:a3,leftshoulder:b4,rightshoulder:b5,start:b9,back:b8,",
++      pro2_guid);
++  if (m.layout != ControllerLayout::Nintendo || m.swap_dpad_lr) return 20;
++
++  // Ultimate (a:b0,b:b1) must stay Standard — not a blanket 8BitDo rule.
++  ControllerMapping ult = DetectControllerMapping(
++      "SDL/0/8BitDo Ultimate", "a:b0,b:b1,x:b2,y:b3,dpleft:h0.8,dpright:h0.2,",
++      "03000000c82d00001330000011010000");
++  if (ult.layout != ControllerLayout::Standard || ult.swap_dpad_lr) return 21;
++
++  // 64 (a:b0,b:b1) stays Standard.
++  ControllerMapping n64 = DetectControllerMapping(
++      "SDL/0/8BitDo 64", "a:b0,b:b1,x:b2,y:b3,", "03000000c82d00001930000000000000");
++  if (n64.layout != ControllerLayout::Standard) return 22;
++
++  // Pro 2 Switch-mode report (a:b3,b:b2 -> a>b -> Nintendo).
++  ControllerMapping sw = DetectControllerMapping(
++      "SDL/0/8BitDo Pro 2", "a:b3,b:b2,x:b8,y:b7,dpleft:b14,dpright:b15,",
++      "05000000ac05000004000000fd216d04");
++  if (sw.layout != ControllerLayout::Nintendo) return 23;
++
++  // Synthetic reversed D-pad: hat (left h0.2 / right h0.8) and button (left>right).
++  ControllerMapping rev = DetectControllerMapping(
++      "SDL/0/8BitDo Pro 2", "a:b1,b:b0,dpleft:h0.2,dpright:h0.8,", pro2_guid);
++  if (!rev.swap_dpad_lr) return 24;
++  ControllerMapping revb = DetectControllerMapping(
++      "SDL/0/8BitDo Pro 2", "a:b1,b:b0,dpleft:b5,dpright:b4,", pro2_guid);
++  if (!revb.swap_dpad_lr) return 25;
++
++  // No regression: standard Xbox (a:b0,b:b1) and DualSense (a:b1,b:b2, a<b).
++  ControllerMapping xbox = DetectControllerMapping(
++      "SDL/0/Xbox One Controller", "a:b0,b:b1,x:b2,y:b3,dpleft:b13,dpright:b14,",
++      "030000005e040000ea02000000000000");
++  if (xbox.layout != ControllerLayout::Standard || xbox.swap_dpad_lr) return 26;
++  ControllerMapping ds = DetectControllerMapping(
++      "SDL/0/PS5 Controller", "a:b1,b:b2,x:b0,y:b3,dpleft:h0.8,dpright:h0.2,",
++      "030000004c050000e60c000000000000");
++  if (ds.layout != ControllerLayout::Standard || ds.swap_dpad_lr) return 27;
++  // Edge GUID is forced Standard regardless of a/b ordering.
++  ControllerMapping edge = DetectControllerMapping(
++      "SDL/0/DualSense Edge", "a:b1,b:b0,", "030000004c050000f20d000000000000");
++  if (edge.layout != ControllerLayout::Standard) return 28;
++
++  const fs::path laydir = directory / "layout";
++  const auto read_profile = [&]() {
++    std::ifstream in(laydir / "Config" / CONTROLLER_CONFIG_NAME);
++    return std::string(std::istreambuf_iterator<char>(in),
++                       std::istreambuf_iterator<char>());
++  };
++  // Nintendo generation swaps A/B and X/Y.
++  if (!GenerateControllerConfig(laydir, std::string("SDL/0/8BitDo Pro 2"), m, &error))
++    return 29;
++  std::string nprof = read_profile();
++  if (!nprof.contains("Buttons/A = `Button B`") ||
++      !nprof.contains("Buttons/B = `Button A`") ||
++      !nprof.contains("Buttons/X = `Button Y`") ||
++      !nprof.contains("Buttons/Y = `Button X`"))
++    return 30;
++  if (!ControllerProfileIsDefault(nprof, ControllerLayout::Nintendo)) return 31;
++  if (ControllerProfileIsDefault(nprof, ControllerLayout::Standard)) return 32;
++
++  // Reversed D-pad generation swaps left/right.
++  if (!GenerateControllerConfig(laydir, std::string("SDL/0/8BitDo Pro 2"), rev, &error))
++    return 33;
++  std::string rprof = read_profile();
++  if (!rprof.contains("D-Pad/Left = `Pad E`") ||
++      !rprof.contains("D-Pad/Right = `Pad W`"))
++    return 34;
++  if (!ControllerProfileDpadSwapped(rprof)) return 35;
++
++  // Standard generation unchanged (no regression).
++  if (!GenerateControllerConfig(laydir, std::string("SDL/0/Xbox One Controller"), xbox, &error))
++    return 36;
++  std::string sprof = read_profile();
++  if (!sprof.contains("Buttons/A = `Button A`") ||
++      !sprof.contains("D-Pad/Left = `Pad W`"))
++    return 37;
++  if (!ControllerProfileIsDefault(sprof, ControllerLayout::Standard)) return 38;
++
++  // A hand-edited (custom) profile is not "default" -> migration preserves it.
++  if (ControllerProfileIsDefault(
++          "[GCPad1]\nDevice = SDL/9/Custom\nButtons/A = Custom\n",
++          ControllerLayout::Standard))
++    return 39;
++
+   fs::remove_all(directory);
+   return 0;
+ }
 diff --git a/tools/frontend_config.cpp b/tools/frontend_config.cpp
-index 03740d4..3ea1408 100644
+index 03740d4..d9349df 100644
 --- a/tools/frontend_config.cpp
 +++ b/tools/frontend_config.cpp
-@@ -3,7 +3,11 @@
+@@ -3,7 +3,12 @@
  #include <algorithm>
  #include <cctype>
  #include <charconv>
@@ -168,11 +292,261 @@ index 03740d4..3ea1408 100644
 +#include <cstdlib>
  #include <fstream>
 +#include <iterator>
++#include <optional>
 +#include <sstream>
  #include <string_view>
  
  namespace fs = std::filesystem;
-@@ -103,8 +107,14 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -71,8 +76,248 @@ std::string_view ControllerSectionPrefix() {
+ #endif
+ }
+ 
++int HexNibble(char c) {
++  if (c >= '0' && c <= '9')
++    return c - '0';
++  if (c >= 'a' && c <= 'f')
++    return c - 'a' + 10;
++  if (c >= 'A' && c <= 'F')
++    return c - 'A' + 10;
++  return -1;
++}
++
++std::optional<std::uint16_t> GuidWord(std::string_view guid,
++                                      std::size_t offset) {
++  if (guid.size() < offset + 4)
++    return std::nullopt;
++  const int low = HexNibble(guid[offset]);
++  const int low2 = HexNibble(guid[offset + 1]);
++  const int high = HexNibble(guid[offset + 2]);
++  const int high2 = HexNibble(guid[offset + 3]);
++  if (low < 0 || low2 < 0 || high < 0 || high2 < 0)
++    return std::nullopt;
++  return static_cast<std::uint16_t>((low << 4) | low2 |
++                                    (((high << 4) | high2) << 8));
++}
++
++enum class ControllerGuidFamily { Unknown, DualSenseEdge, XboxElite };
++
++ControllerGuidFamily ClassifyControllerGuid(std::string_view guid) {
++  const std::optional<std::uint16_t> vendor = GuidWord(guid, 8);
++  const std::optional<std::uint16_t> product = GuidWord(guid, 16);
++  if (!vendor || !product)
++    return ControllerGuidFamily::Unknown;
++  if (*vendor == 0x054c && *product == 0x0df2)
++    return ControllerGuidFamily::DualSenseEdge;
++  if (*vendor == 0x045e &&
++      (*product == 0x02e3 || *product == 0x0b00 || *product == 0x0b05))
++    return ControllerGuidFamily::XboxElite;
++  return ControllerGuidFamily::Unknown;
++}
++
++std::string_view MappingValue(std::string_view mapping, std::string_view key) {
++  std::string needle(key);
++  needle += ':';
++  std::size_t position = 0;
++  while ((position = mapping.find(needle, position)) != std::string_view::npos) {
++    if (position == 0 || mapping[position - 1] == ',') {
++      const std::size_t begin = position + needle.size();
++      const std::size_t end = mapping.find(',', begin);
++      return mapping.substr(begin, end == std::string_view::npos
++                                      ? std::string_view::npos
++                                      : end - begin);
++    }
++    position += needle.size();
++  }
++  return {};
++}
++
++std::optional<int> ButtonIndex(std::string_view value) {
++  if (value.size() < 2 || value.front() != 'b')
++    return std::nullopt;
++  int index = 0;
++  const auto parsed =
++      std::from_chars(value.data() + 1, value.data() + value.size(), index);
++  if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size())
++    return std::nullopt;
++  return index;
++}
++
++void WriteGameCubeMapping(std::ostream &output, ControllerMapping mapping) {
++  const bool nintendo = mapping.layout == ControllerLayout::Nintendo;
++  const char *dpad_left = mapping.swap_dpad_lr ? "`Pad E`" : "`Pad W`";
++  const char *dpad_right = mapping.swap_dpad_lr ? "`Pad W`" : "`Pad E`";
++  output << "Buttons/A = " << (nintendo ? "`Button B`" : "`Button A`") << '\n'
++         << "Buttons/B = " << (nintendo ? "`Button A`" : "`Button B`") << '\n'
++         << "Buttons/X = " << (nintendo ? "`Button Y`" : "`Button X`") << '\n'
++         << "Buttons/Y = " << (nintendo ? "`Button X`" : "`Button Y`") << '\n'
++         << "Buttons/Z = `Shoulder R`\n"
++            "Buttons/Start = Start\n"
++            "Main Stick/Up = `Left Y+`\n"
++            "Main Stick/Down = `Left Y-`\n"
++            "Main Stick/Left = `Left X-`\n"
++            "Main Stick/Right = `Left X+`\n"
++            "Main Stick/Calibration = 100.00\n"
++            "C-Stick/Up = `Right Y+`\n"
++            "C-Stick/Down = `Right Y-`\n"
++            "C-Stick/Left = `Right X-`\n"
++            "C-Stick/Right = `Right X+`\n"
++            "C-Stick/Calibration = 100.00\n"
++            "Triggers/L = `Trigger L`\n"
++            "Triggers/R = `Trigger R`\n"
++            "Triggers/L-Analog = `Trigger L`\n"
++            "Triggers/R-Analog = `Trigger R`\n"
++            "D-Pad/Up = `Pad N`\n"
++            "D-Pad/Down = `Pad S`\n";
++  output << "D-Pad/Left = " << dpad_left << '\n'
++         << "D-Pad/Right = " << dpad_right << '\n'
++         << "Rumble/Motor = `Motor L` | `Motor R`\n";
++}
++
++void WriteKeyboardMapping(std::ostream &output) {
++  output << "Buttons/A = `RETURN`\n"
++            "Buttons/B = `BACKSPACE`\n"
++            "Buttons/X = `X`\n"
++            "Buttons/Y = `Y`\n"
++            "Buttons/Z = `LSHIFT`\n"
++            "Buttons/Start = `SPACE`\n"
++            "D-Pad/Up = `UP`\n"
++            "D-Pad/Down = `DOWN`\n"
++            "D-Pad/Left = `LEFT`\n"
++            "D-Pad/Right = `RIGHT`\n"
++            "Main Stick/Up = `W`\n"
++            "Main Stick/Down = `S`\n"
++            "Main Stick/Left = `A`\n"
++            "Main Stick/Right = `D`\n"
++            "Main Stick/Calibration = 100.00\n"
++            "C-Stick/Up = `I`\n"
++            "C-Stick/Down = `K`\n"
++            "C-Stick/Left = `J`\n"
++            "C-Stick/Right = `L`\n"
++            "C-Stick/Calibration = 100.00\n"
++            "Triggers/L = `Q`\n"
++            "Triggers/R = `E`\n"
++            "Triggers/L-Analog = `Q`\n"
++            "Triggers/R-Analog = `E`\n";
++}
++
+ } // namespace
+ 
++const char *ControllerLayoutName(ControllerLayout layout) {
++  switch (layout) {
++  case ControllerLayout::Auto:
++    return "auto";
++  case ControllerLayout::Standard:
++    return "standard";
++  case ControllerLayout::Nintendo:
++    return "nintendo";
++  case ControllerLayout::Keyboard:
++    return "keyboard";
++  }
++  return "auto";
++}
++
++ControllerLayout DetectControllerLayout(std::string_view device) {
++  const std::string lower = Lower(std::string(device));
++  if (lower.find("keyboard") != std::string::npos)
++    return ControllerLayout::Keyboard;
++  // Nintendo's face buttons are labelled in the opposite order from the
++  // GameCube pad, so SDL's Button A/B and X/Y need swapping. This covers the
++  // Switch Pro Controller, Joy-Con, Switch Online pads and Wii U Pro pads.
++  if (lower.find("switch") != std::string::npos ||
++      lower.find("joy-con") != std::string::npos ||
++      lower.find("joycon") != std::string::npos ||
++      lower.find("nintendo") != std::string::npos ||
++      lower.find("pro controller") != std::string::npos ||
++      lower.find("wii u") != std::string::npos)
++    return ControllerLayout::Nintendo;
++  // Xbox, PlayStation, Steam Deck, 8BitDo in XInput mode, the GameCube
++  // adapter and generic SDL pads all use the standard positional layout.
++  return ControllerLayout::Standard;
++}
++
++ControllerMapping DetectControllerMapping(std::string_view device,
++                                          std::string_view sdl_mapping,
++                                          std::string_view sdl_guid) {
++  ControllerMapping result;
++  const std::string lower = Lower(std::string(device));
++  if (lower.find("keyboard") != std::string::npos) {
++    result.layout = ControllerLayout::Keyboard;
++    return result;
++  }
++
++  const ControllerGuidFamily family = ClassifyControllerGuid(sdl_guid);
++  if (family == ControllerGuidFamily::DualSenseEdge ||
++      family == ControllerGuidFamily::XboxElite) {
++    // Edge/Elite are standard-position pads. Their extra paddles/Fn buttons
++    // are intentionally not bound; the standard face buttons, sticks, D-pad
++    // and triggers behave exactly like the base DualSense/Xbox pads.
++    result.layout = ControllerLayout::Standard;
++  } else if (lower.find("switch") != std::string::npos ||
++             lower.find("joy-con") != std::string::npos ||
++             lower.find("joycon") != std::string::npos ||
++             lower.find("nintendo") != std::string::npos ||
++             lower.find("pro controller") != std::string::npos ||
++             lower.find("wii u") != std::string::npos) {
++    // Keep the established name rule for Nintendo first-party pads. Their SDL
++    // DB entries are not consistent about a/b ordering across firmware, but the
++    // project has always treated the printed labels as the reference.
++    result.layout = ControllerLayout::Nintendo;
++  } else {
++    // 8BitDo is the important case: Pro 2/SN30/SF30/N30 and the Switch-mode
++    // report use a:b1,b:b0 (or a:b3,b:b2), while the Ultimate and 64 families
++    // use a:b0,b:b1. Read the live SDL mapping rather than guessing from the
++    // product name, so XInput and Switch modes are both correct.
++    const std::optional<int> a = ButtonIndex(MappingValue(sdl_mapping, "a"));
++    const std::optional<int> b = ButtonIndex(MappingValue(sdl_mapping, "b"));
++    if (a && b && *a != *b)
++      result.layout = *a > *b ? ControllerLayout::Nintendo
++                              : ControllerLayout::Standard;
++    else
++      result.layout = DetectControllerLayout(device);
++  }
++
++  // Some 8BitDo reports expose the D-pad in the opposite left/right order.
++  // Correct it from the mapping itself; the standard 8BitDo entries in the
++  // shipped SDL DB are already left/right correct and stay unchanged.
++  const std::string_view left = MappingValue(sdl_mapping, "dpleft");
++  const std::string_view right = MappingValue(sdl_mapping, "dpright");
++  if (!left.empty() && !right.empty()) {
++    if (left.starts_with("h") && right.starts_with("h")) {
++      result.swap_dpad_lr = left == "h0.2" && right == "h0.8";
++    } else {
++      const std::optional<int> left_button = ButtonIndex(left);
++      const std::optional<int> right_button = ButtonIndex(right);
++      if (left_button && right_button)
++        result.swap_dpad_lr = *left_button > *right_button;
++      else if (left.starts_with("+") && right.starts_with("-"))
++        result.swap_dpad_lr = true;
++    }
++  }
++  return result;
++}
++
++bool ControllerProfileDpadSwapped(std::string_view text) {
++  return text.find("D-Pad/Left = `Pad E`") != std::string_view::npos &&
++         text.find("D-Pad/Right = `Pad W`") != std::string_view::npos;
++}
++
++bool ControllerProfileIsDefault(std::string_view text,
++                                ControllerLayout layout) {
++  if (layout == ControllerLayout::Keyboard)
++    return text.find("Buttons/A = `RETURN`") != std::string_view::npos &&
++           text.find("Buttons/B = `BACKSPACE`") != std::string_view::npos;
++  const bool nintendo = layout == ControllerLayout::Nintendo;
++  return text.find(nintendo ? "Buttons/A = `Button B`" : "Buttons/A = `Button A`") !=
++             std::string_view::npos &&
++         text.find(nintendo ? "Buttons/B = `Button A`" : "Buttons/B = `Button B`") !=
++             std::string_view::npos &&
++         text.find(nintendo ? "Buttons/X = `Button Y`" : "Buttons/X = `Button X`") !=
++             std::string_view::npos &&
++         text.find(nintendo ? "Buttons/Y = `Button X`" : "Buttons/Y = `Button Y`") !=
++             std::string_view::npos;
++}
++
+ const std::vector<ResolutionOption> &SupportedResolutions() {
+   // These are the output-resolution labels used by Dolphin's integer EFB
+   // scales.
+@@ -103,8 +348,14 @@ ConfigResult LoadConfig(const fs::path &user_directory,
    std::ifstream file(path);
    if (!file)
      return {.error = "can't open " + path.string()};
@@ -187,7 +561,28 @@ index 03740d4..3ea1408 100644
    std::string line;
    while (std::getline(file, line)) {
      if (!line.empty() && line.back() == '\r')
-@@ -140,6 +150,73 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -128,6 +379,20 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+     }
+     else if (key == "controller")
+       config.controller = raw_value;
++    else if (key == "controller_layout") {
++      const std::string layout = Lower(raw_value);
++      if (layout == "auto" || layout == "standard" || layout == "xbox" ||
++          layout == "playstation")
++        config.controller_layout = layout == "auto" ? "auto" : "standard";
++      else if (layout == "nintendo" || layout == "switch")
++        config.controller_layout = "nintendo";
++      else if (layout == "keyboard")
++        config.controller_layout = "keyboard";
++      else
++        return {.error =
++                    "controller_layout must be auto, standard, nintendo or "
++                    "keyboard"};
++    }
+     else if (key.starts_with("controller") && key.size() == 11 &&
+              key.back() >= '1' && key.back() <= '4') {
+       const std::size_t index = static_cast<std::size_t>(key.back() - '1');
+@@ -140,6 +405,73 @@ ConfigResult LoadConfig(const fs::path &user_directory,
      } else if (key == "fullscreen") {
        if (!ParseBoolean(value, &config.fullscreen))
          return {.error = "fullscreen must be true or false"};
@@ -261,7 +656,7 @@ index 03740d4..3ea1408 100644
      } else if (key == "nickname")
        config.netplay_nickname = raw_value;
      else if (key == "address")
-@@ -216,7 +293,13 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -216,7 +548,13 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
        config.netplay_nickname.find_first_of("\r\n") != std::string::npos ||
        !ValidNetplayAddress(config.netplay_address) ||
        config.netplay_address.find_first_of("\r\n") != std::string::npos ||
@@ -276,7 +671,7 @@ index 03740d4..3ea1408 100644
      if (error)
        *error = "invalid frontend settings";
      return false;
-@@ -257,6 +340,23 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -257,6 +595,23 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
         << "fullscreen=" << (config.fullscreen ? "true" : "false") << '\n'
         << "show_fps_in_title=" << (config.show_fps_in_title ? "true" : "false")
         << '\n'
@@ -300,12 +695,175 @@ index 03740d4..3ea1408 100644
         << "[Input]\n";
    for (std::size_t i = 0; i < config.controllers.size() && i < 4; ++i) {
      if (config.controllers[i].find_first_of("\r\n") != std::string::npos) {
+@@ -266,7 +621,8 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+     }
+     file << "controller" << i + 1 << '=' << config.controllers[i] << '\n';
+   }
+-  file << "[Netplay]\n"
++  file << "controller_layout=" << config.controller_layout << '\n'
++       << "[Netplay]\n"
+        << "nickname=" << config.netplay_nickname << '\n'
+        << "address=" << config.netplay_address << '\n'
+        << "port=" << config.netplay_port << '\n'
+@@ -338,7 +694,7 @@ bool ControllerConfigExists(const fs::path &user_directory) {
+ 
+ bool GenerateControllerConfig(const fs::path &user_directory,
+                               std::span<const std::string> controllers,
+-                              std::string *message) {
++                              ControllerMapping mapping, std::string *message) {
+   if (controllers.empty() || controllers.size() > 4) {
+     if (message)
+       *message = "select between one and four connected SDL gamepads";
+@@ -372,33 +728,19 @@ bool GenerateControllerConfig(const fs::path &user_directory,
+     output << "[GCPad" << i + 1 << "]\n";
+     if (i >= controllers.size())
+       continue;
+-    output << "Device = " << controllers[i] << '\n'
+-           << "Buttons/A = `Button A`\n"
+-              "Buttons/B = `Button B`\n"
+-              "Buttons/X = `Button X`\n"
+-              "Buttons/Y = `Button Y`\n"
+-              "Buttons/Z = `Shoulder R`\n"
+-              "Buttons/Start = Start\n"
+-              "Main Stick/Up = `Left Y+`\n"
+-              "Main Stick/Down = `Left Y-`\n"
+-              "Main Stick/Left = `Left X-`\n"
+-              "Main Stick/Right = `Left X+`\n"
+-              "Main Stick/Calibration = 100.00\n"
+-              "C-Stick/Up = `Right Y+`\n"
+-              "C-Stick/Down = `Right Y-`\n"
+-              "C-Stick/Left = `Right X-`\n"
+-              "C-Stick/Right = `Right X+`\n"
+-              "C-Stick/Calibration = 100.00\n"
+-              "Triggers/L = `Trigger L`\n"
+-              "Triggers/R = `Trigger R`\n"
+-              "Triggers/L-Analog = `Trigger L`\n"
+-              "Triggers/R-Analog = `Trigger R`\n"
+-              "D-Pad/Up = `Pad N`\n"
+-              "D-Pad/Down = `Pad S`\n"
+-              "D-Pad/Left = `Pad W`\n"
+-              "D-Pad/Right = `Pad E`\n"
+-              "Rumble/Motor = `Motor L` | `Motor R`\n";
++    output << "Device = " << controllers[i] << '\n';
++    const ControllerLayout detected = DetectControllerLayout(controllers[i]);
++    ControllerMapping resolved = mapping;
++    if (detected == ControllerLayout::Keyboard)
++      resolved.layout = ControllerLayout::Keyboard;
++    else if (resolved.layout == ControllerLayout::Auto)
++      resolved.layout = detected;
++    if (resolved.layout == ControllerLayout::Keyboard)
++      WriteKeyboardMapping(output);
++    else
++      WriteGameCubeMapping(output, resolved);
+ #else
++    (void)mapping;
+     output << "[Wiimote" << i + 1 << "]\n";
+     if (i >= controllers.size())
+       continue;
+@@ -458,7 +800,7 @@ bool GenerateControllerConfig(const fs::path &user_directory,
+       *message = "can't write " + destination.string();
+     return false;
+   }
+-  if (message)
++  if (message) {
+     *message = std::to_string(controllers.size()) +
+ #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+                " GameCube controller" +
+@@ -466,15 +808,52 @@ bool GenerateControllerConfig(const fs::path &user_directory,
+                " sideways Wii Remote" +
+ #endif
+                (controllers.size() == 1 ? " mapped" : "s mapped");
++#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
++    if (mapping.layout != ControllerLayout::Auto)
++      *message += std::string(" (") + ControllerLayoutName(mapping.layout) + " layout)";
++    if (mapping.swap_dpad_lr)
++      *message += " (d-pad left/right corrected)";
++#endif
++  }
+   return true;
+ }
+ 
+ bool GenerateControllerConfig(const fs::path &user_directory,
+-                              std::string_view controller,
++                              std::span<const std::string> controllers,
+                               std::string *message) {
++  return GenerateControllerConfig(user_directory, controllers,
++                                  ControllerMapping{ControllerLayout::Auto, false},
++                                  message);
++}
++
++bool GenerateControllerConfig(const fs::path &user_directory,
++                              std::span<const std::string> controllers,
++                              ControllerLayout layout, std::string *message) {
++  return GenerateControllerConfig(user_directory, controllers,
++                                  ControllerMapping{layout, false}, message);
++}
++
++bool GenerateControllerConfig(const fs::path &user_directory,
++                              std::string_view controller,
++                              ControllerMapping mapping, std::string *message) {
+   const std::string value(controller);
+   return GenerateControllerConfig(
+-      user_directory, std::span<const std::string>(&value, 1), message);
++      user_directory, std::span<const std::string>(&value, 1), mapping, message);
++}
++
++bool GenerateControllerConfig(const fs::path &user_directory,
++                              std::string_view controller,
++                              ControllerLayout layout, std::string *message) {
++  return GenerateControllerConfig(user_directory, controller,
++                                  ControllerMapping{layout, false}, message);
++}
++
++bool GenerateControllerConfig(const fs::path &user_directory,
++                              std::string_view controller,
++                              std::string *message) {
++  return GenerateControllerConfig(user_directory, controller,
++                                  ControllerMapping{ControllerLayout::Auto, false},
++                                  message);
+ }
+ 
+ bool EnsureControllerConfig(const fs::path &user_directory,
 diff --git a/tools/frontend_config.hpp b/tools/frontend_config.hpp
-index 3b18d05..b86fb5f 100644
+index 3b18d05..d640586 100644
 --- a/tools/frontend_config.hpp
 +++ b/tools/frontend_config.hpp
-@@ -26,6 +26,19 @@ struct ConfigResult {
+@@ -8,6 +8,30 @@
+ #include <vector>
+ 
+ namespace moderngekko::frontend {
++enum class ControllerLayout {
++  Auto,
++  Standard,
++  Nintendo,
++  Keyboard,
++};
++
++const char *ControllerLayoutName(ControllerLayout layout);
++ControllerLayout DetectControllerLayout(std::string_view device);
++
++// A controller's button family plus any D-pad left/right correction needed by
++// its SDL mapping. DetectControllerMapping parses the live SDL mapping string,
++// so 8BitDo Switch-mode and XInput-mode pads are handled per GUID/report, not
++// by a name guess.
++struct ControllerMapping {
++  ControllerLayout layout = ControllerLayout::Standard;
++  bool swap_dpad_lr = false;
++};
++ControllerMapping DetectControllerMapping(std::string_view device,
++                                          std::string_view sdl_mapping = {},
++                                          std::string_view sdl_guid = {});
++bool ControllerProfileIsDefault(std::string_view text, ControllerLayout layout);
++bool ControllerProfileDpadSwapped(std::string_view text);
++
+ struct ResolutionOption {
+   const char *text;
+   int dolphin_scale;
+@@ -24,8 +48,22 @@ struct ConfigResult {
+   std::string graphics_backend = "Vulkan";
+   std::string controller;
    std::vector<std::string> controllers;
++  std::string controller_layout = "auto";
    bool show_fps_in_title = true;
    bool fullscreen = false;
 +  int msaa = 1;
@@ -318,13 +876,13 @@ index 3b18d05..b86fb5f 100644
 +  bool mute = false;
 +  int volume = 100;
 +  float emulation_speed = 1.0f;
-+  // "jit" uses Dolphin's JIT core (the 60 FPS playable path). "static" runs
-+  // the shipped DolRecomp module and is kept for the static-recomp build.
++  // "jit" uses Dolphin's JIT core (the default playable path for this port).
++  // "static" runs the shipped DolRecomp module (experimental opt-in).
 +  std::string cpu_core = "jit";
    std::string netplay_nickname = "Player";
    std::string netplay_address = "127.0.0.1";
    std::uint16_t netplay_port = 2626;
-@@ -39,6 +52,7 @@ const std::vector<ResolutionOption> &SupportedResolutions();
+@@ -39,6 +77,7 @@ const std::vector<ResolutionOption> &SupportedResolutions();
  const std::vector<GraphicsBackendOption> &SupportedGraphicsBackends();
  ConfigResult LoadConfig(const std::filesystem::path &user_directory,
                          bool create_if_missing);
@@ -332,8 +890,30 @@ index 3b18d05..b86fb5f 100644
  bool SaveConfig(const std::filesystem::path &user_directory,
                  const ConfigResult &config, std::string *error);
  bool SaveConfig(const std::filesystem::path &user_directory,
+@@ -52,9 +91,21 @@ bool ControllerConfigExists(const std::filesystem::path &user_directory);
+ bool GenerateControllerConfig(const std::filesystem::path &user_directory,
+                               std::span<const std::string> controllers,
+                               std::string *message);
++bool GenerateControllerConfig(const std::filesystem::path &user_directory,
++                              std::span<const std::string> controllers,
++                              ControllerLayout layout, std::string *message);
++bool GenerateControllerConfig(const std::filesystem::path &user_directory,
++                              std::span<const std::string> controllers,
++                              ControllerMapping mapping, std::string *message);
+ bool GenerateControllerConfig(const std::filesystem::path &user_directory,
+                               std::string_view controller,
+                               std::string *message);
++bool GenerateControllerConfig(const std::filesystem::path &user_directory,
++                              std::string_view controller,
++                              ControllerLayout layout, std::string *message);
++bool GenerateControllerConfig(const std::filesystem::path &user_directory,
++                              std::string_view controller,
++                              ControllerMapping mapping, std::string *message);
+ bool EnsureControllerConfig(const std::filesystem::path &user_directory,
+                             std::span<const std::string> controllers,
+                             std::string *message);
 diff --git a/tools/moderngekko_launcher.cpp b/tools/moderngekko_launcher.cpp
-index 7699c3d..456dff8 100644
+index 7699c3d..69538b7 100644
 --- a/tools/moderngekko_launcher.cpp
 +++ b/tools/moderngekko_launcher.cpp
 @@ -13,13 +13,26 @@
@@ -776,7 +1356,54 @@ index 7699c3d..456dff8 100644
    std::vector<ControllerOption> controllers = EnumerateControllers();
    bool controller_profile_exists = moderngekko::frontend::ControllerConfigExists(user_directory);
    std::vector<std::string> configured_controllers =
-@@ -716,6 +972,26 @@ int main(int argc, char** argv)
+@@ -639,31 +895,37 @@ int main(int argc, char** argv)
+   std::string selected_controller =
+       configured_controllers.empty() ? config.controller : configured_controllers.front();
+   int controller_index = FindController(controllers, selected_controller);
++  int controller_layout_index =
++      config.controller_layout == "standard" ? 1
++      : config.controller_layout == "nintendo" ? 2
++                                               : 0;
+   std::string controller_status;
++  const auto selected_layout = [&]() {
++    using moderngekko::frontend::ControllerLayout;
++    return controller_layout_index == 1 ? ControllerLayout::Standard
++           : controller_layout_index == 2 ? ControllerLayout::Nintendo
++                                          : ControllerLayout::Auto;
++  };
+   const auto select_controller = [&](int index)
+   {
++    const auto layout = selected_layout();
+     std::string message;
+     if (!moderngekko::frontend::GenerateControllerConfig(user_directory, controllers[index].device,
+-                                                         &message))
++                                                         layout, &message))
+     {
+       std::lock_guard lock(dialog.mutex);
+       dialog.error = std::move(message);
+       return false;
+     }
+-    std::string error;
+-    if (!moderngekko::frontend::SaveConfig(user_directory, resolutions[resolution_index].text,
+-                                           show_fps_in_title, controllers[index].device, &error))
+-    {
+-      std::lock_guard lock(dialog.mutex);
+-      dialog.error = std::move(error);
+-      return false;
+-    }
+     selected_controller = controllers[index].device;
+     configured_controllers = {selected_controller};
+     config.controller = selected_controller;
+     config.controllers = configured_controllers;
+     config.resolution = resolutions[resolution_index].text;
+     config.show_fps_in_title = show_fps_in_title;
++    config.controller_layout = moderngekko::frontend::ControllerLayoutName(layout);
++    if (!save_config())
++      return false;
+     controller_profile_exists = true;
+     controller_status = std::move(message);
+     return true;
+@@ -716,6 +978,26 @@ int main(int argc, char** argv)
      }
    };
    refresh_controllers();
@@ -803,7 +1430,7 @@ index 7699c3d..456dff8 100644
    ExtractionState extraction;
    std::jthread extraction_thread;
    enum class LaunchMode
-@@ -727,6 +1003,12 @@ int main(int argc, char** argv)
+@@ -727,6 +1009,12 @@ int main(int argc, char** argv)
    };
    bool done = false;
    LaunchMode launch_mode = LaunchMode::None;
@@ -816,7 +1443,7 @@ index 7699c3d..456dff8 100644
    while (!done)
    {
      bool controllers_changed = false;
-@@ -753,6 +1035,27 @@ int main(int argc, char** argv)
+@@ -753,6 +1041,27 @@ int main(int argc, char** argv)
          dialog.selected.reset();
        }
      }
@@ -844,7 +1471,7 @@ index 7699c3d..456dff8 100644
      {
        std::lock_guard lock(extraction.mutex);
        if (extraction.finished_game)
-@@ -774,328 +1077,775 @@ int main(int argc, char** argv)
+@@ -774,328 +1083,796 @@ int main(int argc, char** argv)
      ImGui_ImplSDL3_NewFrame();
      ImGui::NewFrame();
      const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -1020,8 +1647,7 @@ index 7699c3d..456dff8 100644
 +    ImGui::TextDisabled("%s", game_ready ? "Game files verified" : "Import a disc to begin");
 +    ImGui::Unindent(16 * S);
 +    ImGui::EndChild();
- 
--    if (current_metadata)
++
 +    // ------------------------------------------------------------------
 +    // Content
 +    // ------------------------------------------------------------------
@@ -1053,10 +1679,7 @@ index 7699c3d..456dff8 100644
 +      ImGui::PopStyleColor(1);
 +    };
 +    const auto row_label = [&](const char* text)
-     {
--      ImGui::Text("Ready: %s [%s]", current_metadata.metadata->game_name.c_str(),
--                  current_metadata.metadata->disc_id.c_str());
--      if (!launcher_savestates.empty())
++    {
 +      ImGui::AlignTextToFramePadding();
 +      ImGui::TextUnformatted(text);
 +    };
@@ -1065,9 +1688,13 @@ index 7699c3d..456dff8 100644
 +      persist_common();
 +      return save_config();
 +    };
-+
+ 
+-    if (current_metadata)
 +    if (page == LauncherPage::Play)
-+    {
+     {
+-      ImGui::Text("Ready: %s [%s]", current_metadata.metadata->game_name.c_str(),
+-                  current_metadata.metadata->disc_id.c_str());
+-      if (!launcher_savestates.empty())
 +      if (ImGui::BeginTable("##play_row", 2, ImGuiTableFlags_SizingStretchSame))
        {
 -        ImGui::TextUnformatted("Start from savestate");
@@ -1221,7 +1848,7 @@ index 7699c3d..456dff8 100644
 +            }
 +          }
 +          ImGui::EndTable();
-         }
++        }
 +        ImGui::Spacing();
 +        if (!launcher_savestates.empty())
 +        {
@@ -1253,7 +1880,7 @@ index 7699c3d..456dff8 100644
 +            ImGui::EndCombo();
 +          }
 +          ImGui::TextDisabled("Solo play only.");
-+        }
+         }
 +        else
 +        {
 +          ImGui::TextDisabled("Savestates appear here after the game writes one.");
@@ -1521,9 +2148,14 @@ index 7699c3d..456dff8 100644
 +                                                        "4:3 standard", "Stretch"};
 +        ImGui::SetNextItemWidth(-1);
 +        if (ImGui::BeginCombo("##aspect", kAspectLabels[aspect_index]))
-+        {
+         {
+-          std::string error;
+-          if (moderngekko::frontend::SaveConfig(user_directory, resolutions[i].text,
+-                                                show_fps_in_title, selected_controller, &error))
 +          for (int i = 0; i < 4; ++i)
-+          {
+           {
+-            resolution_index = static_cast<int>(i);
+-            config.resolution = resolutions[i].text;
 +            const bool selected = aspect_index == i;
 +            if (ImGui::Selectable(kAspectLabels[i], selected))
 +            {
@@ -1536,25 +2168,22 @@ index 7699c3d..456dff8 100644
 +            }
 +            if (selected)
 +              ImGui::SetItemDefaultFocus();
-+          }
+           }
+-          else
 +          ImGui::EndCombo();
 +        }
 +        if (ImGui::Checkbox("Widescreen hack (stretch 3D)", &widescreen_hack))
-         {
--          std::string error;
--          if (moderngekko::frontend::SaveConfig(user_directory, resolutions[i].text,
--                                                show_fps_in_title, selected_controller, &error))
++        {
 +          const bool previous = config.widescreen_hack;
 +          config.widescreen_hack = widescreen_hack;
 +          if (!save_or_report())
            {
--            resolution_index = static_cast<int>(i);
--            config.resolution = resolutions[i].text;
+-            std::lock_guard lock(dialog.mutex);
+-            dialog.error = std::move(error);
 +            widescreen_hack = previous;
 +            config.widescreen_hack = previous;
            }
--          else
-+        }
+         }
 +        end_card();
 +        ImGui::TableNextColumn();
 +        begin_card("##compat_card", "COMPATIBILITY", 214);
@@ -1563,13 +2192,11 @@ index 7699c3d..456dff8 100644
 +          const bool previous = config.efb_access;
 +          config.efb_access = efb_access;
 +          if (!save_or_report())
-           {
--            std::lock_guard lock(dialog.mutex);
--            dialog.error = std::move(error);
++          {
 +            efb_access = previous;
 +            config.efb_access = previous;
-           }
-         }
++          }
++        }
 +        ImGui::TextWrapped("Required for the legal, title and menu screens. Accurate EFB "
 +                           "reads cost nothing in 3D.");
 +        end_card();
@@ -1696,7 +2323,26 @@ index 7699c3d..456dff8 100644
 -    {
 -      ImGui::SetNextItemWidth(180 * scale);
 -      ImGui::SliderInt("Buffer frames", &manual_buffer, 1, 20);
--    }
++      ImGui::TextWrapped("Silences the game, movies and menu sounds. Takes effect the next "
++                         "time you press Play.");
++      ImGui::Spacing();
++      ImGui::BeginDisabled(audio_mute);
++      ImGui::TextDisabled("Master volume");
++      ImGui::SetNextItemWidth(-1);
++      if (ImGui::SliderInt("##volume", &audio_volume, 0, 100, "%d%%"))
++      {
++        const int previous = config.volume;
++        config.volume = audio_volume;
++        if (!save_or_report())
++        {
++          audio_volume = previous;
++          config.volume = previous;
++        }
++      }
++      ImGui::EndDisabled();
++      ImGui::TextDisabled("100% is the game's original mix level.");
++      end_card();
+     }
 -    ImGui::Spacing();
 -    ImGui::TextUnformatted("Game disc image");
 -    if (selected_image)
@@ -1705,40 +2351,10 @@ index 7699c3d..456dff8 100644
 -      ImGui::TextDisabled("No ISO, WBFS, or RVZ selected");
 -
 -    if (!extraction.running)
--    {
--      if (ImGui::Button("Browse for ISO / WBFS / RVZ"))
-+      ImGui::TextWrapped("Silences the game, movies and menu sounds. Takes effect the next "
-+                         "time you press Play.");
-+      ImGui::Spacing();
-+      ImGui::BeginDisabled(audio_mute);
-+      ImGui::TextDisabled("Master volume");
-+      ImGui::SetNextItemWidth(-1);
-+      if (ImGui::SliderInt("##volume", &audio_volume, 0, 100, "%d%%"))
-       {
--        static constexpr SDL_DialogFileFilter filters[] = {
--            {"Disc images", "iso;wbfs;rvz"},
--            {"ISO", "iso"},
--            {"WBFS", "wbfs"},
--            {"RVZ", "rvz"}};
--        const std::string documents = DocumentsDirectory().string();
--        SDL_ShowOpenFileDialog(FileDialogCallback, &dialog, window, filters,
--                               static_cast<int>(std::size(filters)), documents.c_str(), false);
-+        const int previous = config.volume;
-+        config.volume = audio_volume;
-+        if (!save_or_report())
-+        {
-+          audio_volume = previous;
-+          config.volume = previous;
-+        }
-       }
--      if (selected_image)
-+      ImGui::EndDisabled();
-+      ImGui::TextDisabled("100% is the game's original mix level.");
-+      end_card();
-+    }
 +    else if (page == LauncherPage::Controller)
-+    {
-+      begin_card("##pad_card", "CONTROLLER", 214);
+     {
+-      if (ImGui::Button("Browse for ISO / WBFS / RVZ"))
++      begin_card("##pad_card", "CONTROLLER", 270);
 +      const char* controller_preview =
 +          controller_index >= 0
 +              ? controllers[controller_index].label.c_str()
@@ -1748,25 +2364,55 @@ index 7699c3d..456dff8 100644
 +      ImGui::SetNextItemWidth(-1);
 +      if (ImGui::BeginCombo("##controller", controller_preview))
        {
--        ImGui::SameLine();
--        if (ImGui::Button("Extract and Play"))
+-        static constexpr SDL_DialogFileFilter filters[] = {
+-            {"Disc images", "iso;wbfs;rvz"},
+-            {"ISO", "iso"},
+-            {"WBFS", "wbfs"},
+-            {"RVZ", "rvz"}};
+-        const std::string documents = DocumentsDirectory().string();
+-        SDL_ShowOpenFileDialog(FileDialogCallback, &dialog, window, filters,
+-                               static_cast<int>(std::size(filters)), documents.c_str(), false);
 +        for (std::size_t i = 0; i < controllers.size(); ++i)
-         {
--          extraction.completed = 0;
--          extraction.total = 1;
--          extraction.running = true;
++        {
 +          const bool selected = controller_index == static_cast<int>(i);
 +          if (ImGui::Selectable(controllers[i].label.c_str(), selected))
-           {
--            std::lock_guard lock(extraction.mutex);
--            extraction.error.clear();
--            extraction.finished_game.reset();
++          {
 +            controller_index = static_cast<int>(i);
 +            selected_controller = controllers[i].device;
 +            controller_status = controller_profile_exists
 +                                    ? "Existing " + std::string(CONTROLLER_PROFILE_NAME) +
 +                                          " unchanged"
 +                                    : "Ready to generate controller profile";
++          }
++          if (selected)
++            ImGui::SetItemDefaultFocus();
++        }
++        ImGui::EndCombo();
+       }
+-      if (selected_image)
++      ImGui::TextDisabled("Button layout");
++      ImGui::SetNextItemWidth(-1);
++      const char* layout_names[] = {"Auto-detect", "Standard (Xbox / PS)", "Nintendo (A/B swap)"};
++      if (ImGui::BeginCombo("##padlayout", layout_names[controller_layout_index]))
+       {
+-        ImGui::SameLine();
+-        if (ImGui::Button("Extract and Play"))
++        for (int li = 0; li < 3; ++li)
+         {
+-          extraction.completed = 0;
+-          extraction.total = 1;
+-          extraction.running = true;
++          if (ImGui::Selectable(layout_names[li], controller_layout_index == li))
+           {
+-            std::lock_guard lock(extraction.mutex);
+-            extraction.error.clear();
+-            extraction.finished_game.reset();
++            controller_layout_index = li;
++            config.controller_layout =
++                moderngekko::frontend::ControllerLayoutName(selected_layout());
++            save_config();
++            if (controller_index >= 0)
++              select_controller(controller_index);
            }
 -          const fs::path image = *selected_image;
 -          extraction_thread = std::jthread([image, user_directory, release_directory, &extraction]
@@ -1774,7 +2420,7 @@ index 7699c3d..456dff8 100644
 -                                             ExtractDisc(image, user_directory,
 -                                                         release_directory, &extraction);
 -                                           });
-+          if (selected)
++          if (controller_layout_index == li)
 +            ImGui::SetItemDefaultFocus();
          }
 +        ImGui::EndCombo();
@@ -1867,7 +2513,7 @@ index 7699c3d..456dff8 100644
      ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
      SDL_RenderPresent(renderer);
    }
-@@ -1115,150 +1865,184 @@ int main(int argc, char** argv)
+@@ -1115,150 +1892,184 @@ int main(int argc, char** argv)
      }
      else
      {
@@ -1877,16 +2523,12 @@ index 7699c3d..456dff8 100644
 -      // Solo only: see the note by the dropdown.
 -      if (launch_mode == LaunchMode::Solo && selected_savestate >= 0 &&
 -          static_cast<std::size_t>(selected_savestate) < launcher_savestates.size())
-+      std::string missing;
-+      if (!fs::is_regular_file(SiblingRunner(argv[0])))
-       {
+-      {
 -        argument_storage.emplace_back("--load-state");
 -        argument_storage.emplace_back(
 -            moderngekko::frontend::PathText(
 -                launcher_savestates[static_cast<std::size_t>(selected_savestate)]));
-+        missing = "The game runner (" MODERNGEKKO_RUNNER_FILENAME ".exe) is missing from this "
-+                  "folder. Reinstall the app files next to the launcher.";
-       }
+-      }
 -      if (launch_mode == LaunchMode::Host)
 -        argument_storage.emplace_back("--netplay-host");
 -      else if (launch_mode == LaunchMode::Join)
@@ -1895,7 +2537,9 @@ index 7699c3d..456dff8 100644
 -        argument_storage.emplace_back(config.netplay_address);
 -      }
 -      if (launch_mode == LaunchMode::Host || launch_mode == LaunchMode::Join)
--      {
++      std::string missing;
++      if (!fs::is_regular_file(SiblingRunner(argv[0])))
+       {
 -        argument_storage.emplace_back("--netplay-port");
 -        argument_storage.emplace_back(std::to_string(config.netplay_port));
 -        argument_storage.emplace_back("--nickname");
@@ -1907,7 +2551,9 @@ index 7699c3d..456dff8 100644
 -          argument_storage.emplace_back("--controller");
 -          argument_storage.emplace_back(controller);
 -        }
--      }
++        missing = "The game runner (" MODERNGEKKO_RUNNER_FILENAME ".exe) is missing from this "
++                  "folder. Reinstall the app files next to the launcher.";
+       }
 -      if (use_wayland)
 -        argument_storage.emplace_back("--wayland");
 -#if defined(__linux__)
@@ -1959,16 +2605,16 @@ index 7699c3d..456dff8 100644
 -        if (!process)
 -          process_error = SDL_GetError();
 -        SDL_CloseIO(log_stream);
--      }
+       }
 -      else
--      {
++      if (!missing.empty())
+       {
 -        process = SDL_CreateProcess(arguments.data(), false);
 -        if (!process)
 -          process_error = SDL_GetError();
-       }
+-      }
 -      if (!process)
-+      if (!missing.empty())
-       {
+-      {
 -        launch_error = "Could not start " + SiblingRunner(argv[0]).string() + ": " + process_error;
 -        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Launch failed", launch_error.c_str(),
 +        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Launch failed", missing.c_str(),
@@ -2176,7 +2822,7 @@ index 7699c3d..456dff8 100644
      }
    }
 diff --git a/tools/moderngekko_run.cpp b/tools/moderngekko_run.cpp
-index d6b3569..b826246 100644
+index d6b3569..27be067 100644
 --- a/tools/moderngekko_run.cpp
 +++ b/tools/moderngekko_run.cpp
 @@ -7,6 +7,10 @@
@@ -2190,7 +2836,11 @@ index d6b3569..b826246 100644
  #include <charconv>
  #include <chrono>
  #include <csignal>
-@@ -17,6 +21,7 @@
+@@ -14,9 +18,11 @@
+ #include <exception>
+ #include <filesystem>
+ #include <fstream>
++#include <iterator>
  #include <iostream>
  #include <string>
  #include <thread>
@@ -2198,7 +2848,7 @@ index d6b3569..b826246 100644
  #include <vector>
  
  #if defined(_WIN32)
-@@ -41,11 +46,110 @@ volatile std::sig_atomic_t s_stop_requested = 0;
+@@ -41,13 +47,252 @@ volatile std::sig_atomic_t s_stop_requested = 0;
  
  void HandleStopSignal(int) { s_stop_requested = 1; }
  
@@ -2206,98 +2856,236 @@ index d6b3569..b826246 100644
 +// GCPadNew.ini exists and the player cannot pick a pad there. Detect the
 +// connected SDL gamepads on every boot and keep a working profile: generate one
 +// when absent, and regenerate when the configured pad is no longer connected so
-+// swapping Xbox / PlayStation / Switch / generic pads just works. The mapping
-+// uses SDL's normalized buttons, which are position-consistent across families
-+// (A=bottom, B=right, X=left, Y=top).
-+const char *ControllerFamily(const std::string &name) {
-+  std::string lower;
-+  lower.reserve(name.size());
-+  for (char c : name)
-+    lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-+  const auto has = [&lower](const char *needle) {
-+    return lower.find(needle) != std::string::npos;
-+  };
-+  if (has("xbox") || has("xinput") || has("microsoft"))
-+    return "Xbox";
-+  if (has("dualsense") || has("dualshock") || has("playstation") || has("ps5") ||
-+      has("ps4") || has("sony"))
-+    return "PlayStation";
-+  if (has("switch") || has("pro controller") || has("joy-con") || has("nintendo"))
-+    return "Switch";
-+  return "generic";
++// swapping Xbox / PlayStation / Switch / generic pads just works.
++//
++// Detection is GUID-level (SDL gamecontrollerdb semantics): SDL resolves each
++// device's GUID to a binding string, and the generated profile uses SDL's
++// normalized buttons (A=south/bottom, B=east/right, X=west/left, Y=north/top).
++// That makes a DualSense Edge or Xbox Elite produce the SAME GameCube input as a
++// standard DualSense / Xbox pad. The family label below is derived from the USB
++// vendor id encoded in the GUID (not the device name); the actual layout is
++// SDL's GUID-keyed mapping, logged verbatim for diagnostics.
++
++// Register pro-controller GUIDs missing from the bundled SDL gamepad DB. The DB
++// ships the DualSense Edge Bluetooth GUID (050000004c050000f20d...) but not the
++// USB GUID (Sony 054C:0DF2). Add the USB variants with the standard DualSense
++// (PS5) USB layout so they normalize identically. Xbox Elite Series 1/2 GUIDs
++// (Microsoft 045E:02E3/0B00/0B05) are already present with the standard Xbox
++// layout. Edge paddles/Fn (misc1) and Elite paddles (paddle1-4) are extra buttons
++// the GameCube profile does not bind -> explicitly ignored (no GC equivalent).
++void RegisterProControllerMappings() {
++  static const char *kEdgeUsbLayout =
++      "a:b1,b:b2,back:b8,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,"
++      "guide:b12,leftshoulder:b4,leftstick:b10,lefttrigger:a3,leftx:a0,lefty:a1,"
++      "misc1:b13,rightshoulder:b5,rightstick:b11,righttrigger:a4,rightx:a2,righty:a5,"
++      "start:b9,x:b0,y:b3,";
++  SDL_AddGamepadMapping(
++      (std::string("030000004c050000f20d000000000000,DualSense Edge Controller,") +
++       kEdgeUsbLayout).c_str());
++  SDL_AddGamepadMapping(
++      (std::string("030000004c050000f20d000000010000,DualSense Edge Controller,") +
++       kEdgeUsbLayout).c_str());
 +}
 +
-+// "SDL/<index>/<name>" -> "<name>" so matching ignores the SDL device index.
-+std::string ControllerDeviceName(const std::string &device) {
-+  const std::size_t first = device.find('/');
-+  if (first == std::string::npos)
-+    return device;
-+  const std::size_t second = device.find('/', first + 1);
-+  if (second == std::string::npos)
-+    return device.substr(first + 1);
-+  return device.substr(second + 1);
++std::string GamepadGuid(SDL_JoystickID id) {
++  char buf[33] = {};
++  SDL_GUIDToString(SDL_GetGamepadGUIDForID(id), buf, sizeof(buf));
++  return std::string(buf);
 +}
 +
-+void EnsureDefaultControllerConfig(const std::filesystem::path &user_directory) {
++// SDL GUID hex: VID at chars [8..11], PID at [16..19], little-endian byte pairs.
++void GuidVidPid(const std::string &guid, std::string &vid, std::string &pid) {
++  const auto swap = [](const std::string &s) { return s.substr(2, 2) + s.substr(0, 2); };
++  vid = guid.size() >= 12 ? swap(guid.substr(8, 4)) : "????";
++  pid = guid.size() >= 20 ? swap(guid.substr(16, 4)) : "????";
++}
++
++std::string ReadTextFile(const std::filesystem::path &path) {
++  std::ifstream input(path);
++  return {std::istreambuf_iterator<char>(input),
++          std::istreambuf_iterator<char>()};
++}
++
++std::string ControllerProfileDevice(const std::string &text) {
++  constexpr std::string_view marker = "Device = ";
++  const std::size_t start = text.find(marker);
++  if (start == std::string::npos)
++    return {};
++  const std::size_t begin = start + marker.size();
++  const std::size_t end = text.find_first_of("\r\n", begin);
++  return text.substr(begin, end == std::string::npos ? std::string::npos
++                                                     : end - begin);
++}
++
++moderngekko::frontend::ControllerLayout
++ControllerProfileLayout(const std::string &text) {
++  using moderngekko::frontend::ControllerLayout;
++  if (text.find("Buttons/A = `RETURN`") != std::string::npos)
++    return ControllerLayout::Keyboard;
++  if (text.find("Buttons/A = `Button B`") != std::string::npos)
++    return ControllerLayout::Nintendo;
++  return ControllerLayout::Standard;
++}
++
++struct ControllerDevice {
++  std::string device;
++  std::string guid;
++  std::string mapping;
++};
++
++ControllerDevice ChooseControllerDevice(std::string_view preferred) {
++  constexpr std::string_view keyboard = "DInput/0/Keyboard Mouse";
++  if (preferred == keyboard)
++    return {std::string(keyboard), {}, {}};
++
++  int count = 0;
++  SDL_JoystickID *ids = SDL_GetJoysticks(&count);
++  ControllerDevice first;
++  ControllerDevice match;
++  if (ids) {
++    for (int i = 0; i < count; ++i) {
++      if (!SDL_IsGamepad(ids[i]))
++        continue;
++      const char *name = SDL_GetGamepadNameForID(ids[i]);
++      if (!name || !*name)
++        continue;
++      ControllerDevice candidate;
++      candidate.device = "SDL/0/" + std::string(name);
++      candidate.guid = GamepadGuid(ids[i]);
++      char *mapping = SDL_GetGamepadMappingForID(ids[i]);
++      candidate.mapping = mapping ? mapping : "";
++      SDL_free(mapping);
++      if (first.device.empty())
++        first = candidate;
++      if (candidate.device == preferred)
++        match = candidate;
++    }
++  }
++  SDL_free(ids);
++  return !match.device.empty() ? match : first;
++}
++
++// Startup diagnostic: name / GUID / VID:PID / layout / dpad, plus SDL's
++// GUID-resolved mapping string. Players can send this one line for support.
++void LogControllerDiagnostic(const ControllerDevice &dev,
++                             const moderngekko::frontend::ControllerMapping &mapping) {
++  std::string vid, pid;
++  GuidVidPid(dev.guid, vid, pid);
++  std::cerr << "controller: name=\"" << dev.device << "\" guid=" << dev.guid
++            << " vid=" << vid << " pid=" << pid << " layout="
++            << moderngekko::frontend::ControllerLayoutName(mapping.layout)
++            << " dpad=" << (mapping.swap_dpad_lr ? "swapped" : "normal") << '\n';
++  if (!dev.mapping.empty())
++    std::cerr << "controller:   sdl_mapping=" << dev.mapping << '\n';
++}
++
++// Console-only probe (no game boot, no window): list connected gamepads with the
++// GUID/layout diagnostic. Useful for players to confirm a pad is recognized.
++int ListControllers() {
 +  if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
 +    std::cerr << "controller: SDL init failed: " << SDL_GetError() << '\n';
-+    return;
++    return 1;
 +  }
-+
-+  // Enumerate connected gamepads, mirroring the launcher's device-string format.
-+  std::vector<std::string> devices;
-+  std::vector<std::string> names;
-+  std::unordered_map<std::string, int> seen;
++  RegisterProControllerMappings();
++  SDL_PumpEvents();
++  SDL_Delay(150);
 +  int count = 0;
++  int pads = 0;
 +  SDL_JoystickID *ids = SDL_GetJoysticks(&count);
 +  if (ids) {
 +    for (int i = 0; i < count; ++i) {
 +      if (!SDL_IsGamepad(ids[i]))
 +        continue;
 +      const char *name = SDL_GetGamepadNameForID(ids[i]);
-+      const std::string label = name && *name ? name : "Unknown Controller";
-+      const int index = seen[label]++;
-+      devices.push_back("SDL/" + std::to_string(index) + "/" + label);
-+      names.push_back(label);
++      ControllerDevice dev;
++      dev.device = std::string("SDL/0/") + (name && *name ? name : "Unknown Controller");
++      dev.guid = GamepadGuid(ids[i]);
++      char *mapping = SDL_GetGamepadMappingForID(ids[i]);
++      dev.mapping = mapping ? mapping : "";
++      SDL_free(mapping);
++      const auto resolved =
++          moderngekko::frontend::DetectControllerMapping(dev.device, dev.mapping, dev.guid);
++      LogControllerDiagnostic(dev, resolved);
++      ++pads;
 +    }
 +  }
 +  SDL_free(ids);
-+
-+  if (devices.empty()) {
++  if (pads == 0)
 +    std::cerr << "controller: no SDL gamepad detected\n";
-+    SDL_Quit();
++  SDL_Quit();
++  return 0;
++}
++
++// Detect the connected pad, choose its button family from the LIVE SDL mapping
++// (per GUID, not name), and keep a working profile. Default profiles migrate to
++// the detected layout; hand-edited (custom) profiles are preserved; an explicit
++// controller_layout / --controller-layout forces a layout. Mirrors the WMX8 fix
++// for 8BitDo Nintendo-layout pads (A/B and X/Y reversed) without a blanket rule.
++void EnsureDefaultControllerConfig(
++    const std::filesystem::path &user_directory,
++    moderngekko::frontend::ControllerLayout requested_layout,
++    std::string_view preferred_device) {
++  using moderngekko::frontend::ControllerLayout;
++  using moderngekko::frontend::ControllerMapping;
++
++  if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
++    std::cerr << "controller: SDL init failed: " << SDL_GetError() << '\n';
 +    return;
 +  }
-+  for (const std::string &name : names)
-+    std::cerr << "controller: " << ControllerFamily(name) << " gamepad: " << name
-+              << '\n';
++  RegisterProControllerMappings();
 +
-+  // Keep an existing profile whose pads are still connected (respect a deliberate
-+  // launcher choice). Match by name so a changed SDL index does not force a rewrite.
-+  const auto configured =
-+      moderngekko::frontend::ReadConfiguredControllers(user_directory);
-+  bool profile_matches = !configured.empty();
-+  for (const std::string &device : configured) {
-+    const std::string want = ControllerDeviceName(device);
-+    if (std::find(names.begin(), names.end(), want) == names.end()) {
-+      profile_matches = false;
-+      break;
-+    }
-+  }
-+  if (profile_matches) {
-+    std::cerr << "controller: keeping existing profile for " << configured.front()
-+              << '\n';
-+    SDL_Quit();
-+    return;
-+  }
++  constexpr std::string_view keyboard_device = "DInput/0/Keyboard Mouse";
++  ControllerDevice chosen = ChooseControllerDevice(preferred_device);
++  std::string device = chosen.device;
++  if (requested_layout == ControllerLayout::Keyboard)
++    device = std::string(keyboard_device);
++  if (device.empty())
++    device = std::string(keyboard_device);
 +
-+  // (Re)generate for the connected pads (up to four ports).
-+  if (devices.size() > 4)
-+    devices.resize(4);
-+  std::string message;
-+  if (moderngekko::frontend::GenerateControllerConfig(user_directory, devices,
-+                                                       &message))
-+    std::cerr << "controller configuration: " << message << '\n';
++  ControllerMapping mapping =
++      moderngekko::frontend::DetectControllerMapping(device, chosen.mapping,
++                                                     chosen.guid);
++  if (device == keyboard_device) {
++    mapping = {ControllerLayout::Keyboard, false};
++  } else if (requested_layout != ControllerLayout::Auto) {
++    mapping.layout = requested_layout;
++  }
++  if (mapping.layout == ControllerLayout::Keyboard)
++    mapping.swap_dpad_lr = false;
++
++  const std::filesystem::path profile_path =
++      user_directory / "Config" / "GCPadNew.ini";
++  const std::string existing = ReadTextFile(profile_path);
++  const bool exists = !existing.empty();
++  const std::string existing_device = ControllerProfileDevice(existing);
++  const ControllerLayout existing_layout = ControllerProfileLayout(existing);
++  const bool existing_dpad_swapped =
++      moderngekko::frontend::ControllerProfileDpadSwapped(existing);
++
++  bool regenerate = !exists || existing_device != device;
++  if (!regenerate && requested_layout != ControllerLayout::Auto)
++    regenerate = existing_layout != mapping.layout;
++  if (!regenerate && requested_layout == ControllerLayout::Auto &&
++      existing_layout != mapping.layout &&
++      moderngekko::frontend::ControllerProfileIsDefault(existing, existing_layout))
++    regenerate = true;
++  if (!regenerate && existing_dpad_swapped != mapping.swap_dpad_lr &&
++      moderngekko::frontend::ControllerProfileIsDefault(existing, existing_layout))
++    regenerate = true;
++
++  LogControllerDiagnostic(chosen, mapping);
++
++  if (regenerate) {
++    std::string message;
++    if (moderngekko::frontend::GenerateControllerConfig(
++            user_directory, device, mapping, &message))
++      std::cerr << "controller configuration: " << message << '\n';
++    else
++      std::cerr << "controller configuration failed: " << message << '\n';
++  } else {
++    std::cerr << "controller: using existing " << profile_path.filename().string()
++              << " for " << existing_device << '\n';
++  }
 +  SDL_Quit();
 +}
 +
@@ -2309,8 +3097,12 @@ index d6b3569..b826246 100644
 +               "       [--core <jit|static>] [--graphics <backend>] [--audio <backend>]\n"
                 "       [--mods <directory>] [--no-mods]\n"
                 "       [--wayland] [-X11] [--headless] [--allow-interpreter]\n"
++               "       [--list-controllers]\n"
++               "       [--controller-layout <auto|standard|nintendo|keyboard>]\n"
                 "       [--netplay-host | --netplay-join <host>] "
-@@ -141,6 +245,7 @@ int RunMain(int argc, char **argv) {
+                "[--netplay-port <port>]\n"
+                "       [--nickname <name>] [--buffer <auto|1-20>] "
+@@ -141,12 +386,14 @@ int RunMain(int argc, char **argv) {
    config.window_title = MODERNGEKKO_DEFAULT_WINDOW_TITLE;
  #endif
    std::filesystem::path module_path;
@@ -2318,7 +3110,14 @@ index d6b3569..b826246 100644
    bool use_default_mods = true;
    std::optional<moderngekko::frontend::NetplayRole> netplay_role;
    std::string netplay_address;
-@@ -161,7 +266,14 @@ int RunMain(int argc, char **argv) {
+   std::optional<std::uint16_t> netplay_port;
+   std::string netplay_nickname;
+   std::string netplay_buffer;
++  std::string controller_layout_override;
+   std::vector<std::string> netplay_controllers;
+   for (int i = 1; i < argc; ++i) {
+     const std::string arg = argv[i];
+@@ -161,7 +408,14 @@ int RunMain(int argc, char **argv) {
        config.game_root = value("--game");
      else if (arg == "--module")
        module_path = value("--module");
@@ -2334,7 +3133,32 @@ index d6b3569..b826246 100644
        config.user_directory = value("--user-dir");
      else if (arg == "--title")
        config.window_title = value("--title");
-@@ -245,16 +357,47 @@ int RunMain(int argc, char **argv) {
+@@ -220,7 +474,23 @@ int RunMain(int argc, char **argv) {
+       netplay_buffer = value("--buffer");
+     else if (arg == "--controller")
+       netplay_controllers.emplace_back(value("--controller"));
+-    else if (arg == "--help" || arg == "-h") {
++    else if (arg == "--controller-layout") {
++      controller_layout_override = value("--controller-layout");
++      if (controller_layout_override == "xbox" ||
++          controller_layout_override == "playstation")
++        controller_layout_override = "standard";
++      else if (controller_layout_override == "switch")
++        controller_layout_override = "nintendo";
++      if (controller_layout_override != "auto" &&
++          controller_layout_override != "standard" &&
++          controller_layout_override != "nintendo" &&
++          controller_layout_override != "keyboard") {
++        std::cerr << "--controller-layout must be auto, standard, nintendo or keyboard\n";
++        return 2;
++      }
++    } else if (arg == "--list-controllers") {
++      return ListControllers();
++    } else if (arg == "--help" || arg == "-h") {
+       Usage();
+       return 0;
+     } else {
+@@ -245,25 +515,57 @@ int RunMain(int argc, char **argv) {
      std::cerr << "invalid config.ini: " << frontend_config.error << '\n';
      return 2;
    }
@@ -2375,14 +3199,33 @@ index d6b3569..b826246 100644
      config.mod_directories.push_back(config.user_directory / "Mods");
    }
  
-+  if (!netplay_role && frontend_config.controller.empty() &&
-+      frontend_config.controllers.empty())
-+    EnsureDefaultControllerConfig(config.user_directory);
-+
-   if (!netplay_role && !frontend_config.controller.empty()) {
-     std::string controller_message;
-     if (!moderngekko::frontend::EnsureControllerConfig(
-@@ -314,7 +457,9 @@ int RunMain(int argc, char **argv) {
+-  if (!netplay_role && !frontend_config.controller.empty()) {
+-    std::string controller_message;
+-    if (!moderngekko::frontend::EnsureControllerConfig(
+-            config.user_directory, frontend_config.controller,
+-            &controller_message)) {
+-      std::cerr << "controller configuration: " << controller_message << '\n';
+-      return 2;
+-    }
+-    std::cout << "controller configuration: " << controller_message << '\n';
++  if (!netplay_role) {
++    using moderngekko::frontend::ControllerLayout;
++    ControllerLayout layout = ControllerLayout::Auto;
++    const std::string &layout_value =
++        controller_layout_override.empty() ? frontend_config.controller_layout
++                                           : controller_layout_override;
++    if (layout_value == "standard")
++      layout = ControllerLayout::Standard;
++    else if (layout_value == "nintendo")
++      layout = ControllerLayout::Nintendo;
++    else if (layout_value == "keyboard")
++      layout = ControllerLayout::Keyboard;
++    EnsureDefaultControllerConfig(config.user_directory, layout,
++                                  frontend_config.controller);
+   }
+ 
+ #ifdef MODERNGEKKO_DOL_PATCH_MANIFEST
+@@ -314,7 +616,9 @@ int RunMain(int argc, char **argv) {
  #endif
  
    // Compatibility discovery belongs to the runner, never the runtime library.
@@ -2393,7 +3236,7 @@ index d6b3569..b826246 100644
      if (const char *env = std::getenv("STATICRECOMP_MODULE"))
        module_path = env;
      else {
-@@ -329,7 +474,7 @@ int RunMain(int argc, char **argv) {
+@@ -329,7 +633,7 @@ int RunMain(int argc, char **argv) {
          module_path = user_module;
      }
    }
@@ -2402,7 +3245,7 @@ index d6b3569..b826246 100644
      config.module =
          moderngekko::ModuleSource::DynamicPath(std::move(module_path));
  
-@@ -458,6 +603,8 @@ void PinProcessToLargestCache() {
+@@ -458,6 +762,8 @@ void PinProcessToLargestCache() {
  int main(int argc, char **argv) {
    try {
  #if defined(_WIN32)
