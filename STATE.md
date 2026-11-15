@@ -119,10 +119,19 @@ Updated: 2026-11-13 (v0.1.2 single-runner launcher parity release)
 
 ## Release
 
-- Version: **v0.1.4** (current; supersedes v0.1.3)
+- Version: **v0.1.5** (current; supersedes v0.1.4)
 - Ship decision (user-approved 2026-11-11): **JIT default, static recomp opt-in
   (experimental)** due to the rare static-core heavy-mode corruption.
-- v0.1.4 adds: **native RVZ support** (no manual RVZ->ISO conversion). Launcher
+- v0.1.5 adds: **8BitDo Nintendo-layout fix** (per-GUID live SDL a/b detection;
+  Pro 2/SN30/SF30/N30 Nintendo-mode get A/B+X/Y swapped + reversed D-pad
+  corrected; Ultimate/64 stay standard — no blanket rule) and **DualSense Edge +
+  Xbox Elite S1/S2 support** (standard layout; Edge USB GUID registered at
+  runtime; paddles/Fn ignored). Manual override via launcher Button layout combo
+  / `controller_layout` / `--controller-layout`; default profiles migrate, custom
+  preserved; startup diagnostic name/GUID/VID:PID/layout/dpad + `--list-controllers`.
+  Offline unit tests pass; controllers verified offline (no physical Edge/Elite/
+  8BitDo hardware on the build machine — player confirmation requested).
+- v0.1.4 added: **native RVZ support** (no manual RVZ->ISO conversion). Launcher
   picker + DiscIO read `.rvz`; `tools/rvz_extract.py` (zstd + Dolphin LFG padding,
   reused from the guide) decodes RVZ directly to `sys/`+`files/` (legacy
   positional RVZ->ISO kept); `DOR2Prepare` detects `RVZ\x01` and delegates;
@@ -143,18 +152,18 @@ Updated: 2026-11-13 (v0.1.2 single-runner launcher parity release)
 - Manifest: `docs\release\recomplauncher.json` (validates, 0 errors);
   `prepare` = `DOR2Recomp.exe --extract {game}`; `start` = single runner with
   `--module`/`--user-dir`; `cpu_core=jit` in ensure/new
-- Package: `dist\DOR2StaticRecomp-v0.1.4-Windows-x64\` + zip + `SHA256SUMS.txt`
-- Zip SHA-256 (v0.1.4): `8221a18558c0cbdab981a5b16ec8df8fb383f59bfc3029a8f30b21a78fc294c4`
-  (prior v0.1.3: `c366c096defc0d28243d45fde2358927799740baa6957877edd1f90050e1bfb3`)
+- Package: `dist\DOR2StaticRecomp-v0.1.5-Windows-x64\` + zip + `SHA256SUMS.txt`
+- Zip SHA-256 (v0.1.5): `58af3a39f0aa765d298f1a45b2fda58a167793867b3e490eb2fc4a5e45bef975`
+  (prior v0.1.4: `8221a18558c0cbdab981a5b16ec8df8fb383f59bfc3029a8f30b21a78fc294c4`)
 - Verified: expanded-zip hash/layout/icons(both exes)/game-data-scan/schema(0 err);
   staged launcher `--extract` (progress 1.000); staged single-runner JIT boot on a
-  hidden desktop (run-hidden.ps1) 59.9401 fps / vps 59.9402 / speed 1; RVZ path
-  byte-identical to ISO path (3405 files, aggregate SHA-256 `cba19457…`).
-- Release notes: `dist\release-notes-v0.1.4.md`
-- Published: **yes** — https://github.com/Spaced1127/DOR2-Static-Recomp/releases/tag/v0.1.4
-  (user-approved; commit 0de9381, tag v0.1.4). Prior: v0.1.3 (96de8a8), v0.1.2 (1b5585f), v0.1.1 (c31cb7f), v0.1.0 (7f11135).
+  hidden desktop (run-hidden.ps1) 59.9403 fps / vps 59.9401 / speed 1; controller
+  unit tests pass (8BitDo Nintendo/Ultimate/64/Switch-mode/reversed dpad/no regression).
+- Release notes: `dist\release-notes-v0.1.5.md`
+- Published: **yes** — https://github.com/Spaced1127/DOR2-Static-Recomp/releases/tag/v0.1.5
+  (user-approved; commit 69f9a5d, tag v0.1.5). Prior: v0.1.4 (0de9381), v0.1.3 (96de8a8), v0.1.2 (1b5585f), v0.1.1 (c31cb7f), v0.1.0 (7f11135).
 - `repo` field: `Spaced1127/DOR2-Static-Recomp`
-- Download-back verified (v0.1.4): zip sha256 matches SHA256SUMS; recomplauncher.json
+- Download-back verified (v0.1.5): zip sha256 matches SHA256SUMS; recomplauncher.json
   at top; parity layout (no Play.cmd/RunnerCore/Prepare); identical DOR2 icon on
   both exes; game-data scan clean; schema 0 errors.
 - Source reproducibility: upstream submodule pins + `patches/moderngekko-settings.patch`
