@@ -113,10 +113,15 @@ Updated: 2026-11-13 (v0.1.2 single-runner launcher parity release)
 
 ## Release
 
-- Version: **v0.1.2** (current; supersedes v0.1.1)
+- Version: **v0.1.3** (current; supersedes v0.1.2)
 - Ship decision (user-approved 2026-11-11): **JIT default, static recomp opt-in
   (experimental)** due to the rare static-core heavy-mode corruption.
-- v0.1.2 adds: **single-runner launcher parity** with the shared launcher —
+- v0.1.3 adds: **controller support baked into the runner** (RecompLauncher has
+  no controller picker). Auto-detects Xbox/PlayStation/Switch/generic SDL pads
+  every boot, logs the family, keeps a matching `GCPadNew.ini` or regenerates it
+  when the configured pad is gone (pad-swap safe, up to 4 ports), position-
+  consistent SDL mapping. Verified in-game with an Xbox One pad (fresh/adapt/keep).
+- v0.1.2 added: **single-runner launcher parity** with the shared launcher —
   one launcher (`DOR2Recomp.exe`) + one runner (`DOR2RecompRunner.exe`, native
   `--core`); removed the runner-shim + `DOR2RecompRunnerCore.exe` pair and
   `Play.cmd`; RecompLauncher prepare now runs the launcher headless
@@ -126,17 +131,18 @@ Updated: 2026-11-13 (v0.1.2 single-runner launcher parity release)
 - Manifest: `docs\release\recomplauncher.json` (validates, 0 errors);
   `prepare` = `DOR2Recomp.exe --extract {game}`; `start` = single runner with
   `--module`/`--user-dir`; `cpu_core=jit` in ensure/new
-- Package: `dist\DOR2StaticRecomp-v0.1.2-Windows-x64\` + zip + `SHA256SUMS.txt`
-- Zip SHA-256 (v0.1.2): `ae0b0d063de25a5ae1a4b224078c3ba128d0236854d1714a740dfa6261d75a3c`
+- Package: `dist\DOR2StaticRecomp-v0.1.3-Windows-x64\` + zip + `SHA256SUMS.txt`
+- Zip SHA-256 (v0.1.3): `c366c096defc0d28243d45fde2358927799740baa6957877edd1f90050e1bfb3`
+  (prior v0.1.2: `ae0b0d063de25a5ae1a4b224078c3ba128d0236854d1714a740dfa6261d75a3c`)
 - Verified: expanded-zip hash/layout/icons(both exes)/game-data-scan/schema(0 err);
   staged launcher `--extract` (progress 1.000); staged single-runner JIT boot
   59.9402 fps / vps 59.9402 / speed 1; static `fallback=0`/`smc_failed=0`;
   launcher `--play` spawns the runner directly.
-- Release notes: `dist\release-notes-v0.1.2.md`
-- Published: **yes** — https://github.com/Spaced1127/DOR2-Static-Recomp/releases/tag/v0.1.2
-  (user-approved; commit 1b5585f, tag v0.1.2). Prior: v0.1.1 (c31cb7f), v0.1.0 (7f11135).
+- Release notes: `dist\release-notes-v0.1.3.md`
+- Published: **yes** — https://github.com/Spaced1127/DOR2-Static-Recomp/releases/tag/v0.1.3
+  (user-approved; commit 96de8a8, tag v0.1.3). Prior: v0.1.2 (1b5585f), v0.1.1 (c31cb7f), v0.1.0 (7f11135).
 - `repo` field: `Spaced1127/DOR2-Static-Recomp`
-- Download-back verified (v0.1.2): zip sha256 matches SHA256SUMS; recomplauncher.json
+- Download-back verified (v0.1.3): zip sha256 matches SHA256SUMS; recomplauncher.json
   at top; parity layout (no Play.cmd/RunnerCore/Prepare); identical DOR2 icon on
   both exes; game-data scan clean; schema 0 errors.
 - Source reproducibility: upstream submodule pins + `patches/moderngekko-settings.patch`
