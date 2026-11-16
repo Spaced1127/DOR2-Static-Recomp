@@ -42,7 +42,7 @@ GC_PROFILE = {
 def parse_db() -> dict:
     table = {}
     for line in DB.read_text(encoding="utf-8").splitlines():
-        m = re.match(r'\s*"([0-9a-f]{32}),([^,]*),(.*),",?\s*$', line)
+        m = re.match(r'\s*"([0-9a-f]{32}),([^,]*),(.*)",?\s*(?:/\*.*\*/)?$', line)
         if not m:
             continue
         guid, name, binds = m.group(1), m.group(2), m.group(3)
@@ -75,10 +75,14 @@ TARGETS = {
     "DualSense Edge USB": ["030000004c050000f20d000000000000", "030000004c050000f20d000000010000"],
     "DualSense Edge BT": ["050000004c050000f20d000000010000"],
     "DualSense (standard)": ["030000004c050000e60c000000000000", "050000004c050000e60c000000010000"],
-    "Xbox Elite Series 1": ["030000005e040000e302000000000000"],
+    "Xbox Elite Series 1": ["030000005e040000e302000000000000", "050000005e040000050b0000df070001"],
     "Xbox Elite Series 2": ["050000005e040000000b000000783f80", "050000005e040000050b0000ffff3f00"],
-    "Xbox Elite (paddles)": ["050000005e040000050b0000df070001"],
-    "Xbox (standard)": ["030000005e040000ea02000000000000", "050000005e040000120b000000783f80"],
+    "Xbox Elite (paddles)": ["050000005e040000050b0000ff070001"],
+    "Xbox (standard)": ["030000005e0400008e02000010010000", "030000005e040000ea02000000000000",
+                        "050000005e040000120b000000783f80", "050000005e0400008e02000000783f00"],
+    "8BitDo Pro 2": ["03000000c82d00000660000000000000"],
+    "8BitDo Ultimate": ["03000000c82d00001330000000000000", "03000000c82d00001b30000000000000"],
+    "Nintendo Switch Pro": ["030000007e0500000920000000000000", "050000007e05000009200000ff070000"],
 }
 
 
@@ -124,6 +128,16 @@ def main() -> int:
     for gc, sdl in GC_PROFILE.items():
         print(f"  GC {gc:10} <- SDL {sdl}")
     print("  Paddles/Fn (paddle1-4, misc1): NOT bound -> explicitly ignored (no GC equivalent).")
+
+    print("\n=== runtime Edge USB mapping == shipped Edge BT row ===")
+    usb_name, usb = table["030000004c050000f20d000000000000"]
+    bt_name, bt = table["050000004c050000f20d000000010000"]
+    edge_ok = {k: v for k, v in usb.items() if k in REQUIRED} == {
+        k: v for k, v in bt.items() if k in REQUIRED
+    }
+    print(f"{'PASS' if edge_ok else 'FAIL'}: Edge USB (runtime) normalizes identically to Edge BT (DB)")
+    if not edge_ok:
+        failures.append("Edge USB runtime layout differs from the DB Edge BT row")
 
     print("\n=== no regression ===")
     for fam in ("DualSense (standard)", "Xbox (standard)"):

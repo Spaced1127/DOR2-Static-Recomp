@@ -1,6 +1,6 @@
 # STATE
 
-Updated: 2026-11-13 (v0.1.2 single-runner launcher parity release)
+Updated: 2026-11-16 (v0.1.6 controller hotfix, pending approval)
 
 ## Disc
 
@@ -63,11 +63,21 @@ Updated: 2026-11-13 (v0.1.2 single-runner launcher parity release)
 - User directory: `work\user*` for local tests, `{local}\DOR2Recomp` in releases
 - Controllers: **baked into the runner** (no launcher picker needed, works via
   RecompLauncher). `EnsureDefaultControllerConfig` detects connected SDL pads
-  every boot, logs the family (Xbox/PlayStation/Switch/generic), and keeps a
-  matching `GCPadNew.ini` or regenerates it when the configured pad is gone
-  (pad-swap safe). Position-consistent SDL mapping; up to 4 ports. Verified with
-  an Xbox One pad: fresh generate, adapt (disconnected DualSense profile ->
-  Xbox), keep (matching profile preserved); booted 59.94.
+  every boot (0.8 s warm-up for Bluetooth pads), logs name/GUID/VID:PID/layout/
+  dpad/source + the SDL mapping, and keeps a matching `GCPadNew.ini` or
+  regenerates it when the configured pad is gone (pad-swap safe). **A boot with
+  no pad detected keeps the existing profile** (v0.1.6; v0.1.5 overwrote it with
+  the keyboard profile, which is why Xbox pads looked dead). Layout is
+  vendor-scoped: Microsoft/Sony/Valve always standard, 8BitDo by live a/b index,
+  Nintendo first-party by name. Position-consistent SDL mapping; up to 4 ports.
+  Verified: DualSense (BT) on hardware; Xbox/Edge/Elite/8BitDo/PS3/PS2 offline
+  matrix against the shipped SDL DB; profile-keep scenarios on a hidden desktop.
+- Memory card (v0.1.7): raw 128 Mbit card in slot A, empty slot B.
+  `Config/Dolphin.ini` `[Core] SlotA=1` / `SlotB=255` written by
+  `ForceMemoryCardLayout` before `UICommon::CreateDirectories()` +
+  `UICommon::Init()` (DolphinQt order), and forced into the live config layer
+  after Init. Card file: `<user>\GC\MemoryCardA.<region>.raw` (16,777,216
+  bytes). Never `SlotB=0` (Dummy device). Manifest seeds both keys.
 - Target: 59.94 Hz (GameCube VI)
 
 ## Evidence (measured 2026-11-11, reference scene = mid-match savestate)
@@ -106,6 +116,21 @@ Updated: 2026-11-13 (v0.1.2 single-runner launcher parity release)
   top-level layout, icons, game-data scan, schema 0 errors, staged
   `DOR2Prepare` (progress 1.000, DOL/CRC match) and staged runner boot.
 
+## Next actions
+
+1. Await hub/user approval, then commit + tag v0.1.7 and publish the prepared
+   `dist\DOR2StaticRecomp-v0.1.7-Windows-x64.zip` (hash above), and download it
+   back for the release-gate verification.
+2. Optional fresh perf line for v0.1.7: static boot with a savestate, capture
+   `status.txt` (fps/vps/speed) and `fallback=0`/`smc_failed=0`.
+3. Ask players for the `controller:` diagnostic lines from pads that still
+   misbehave (name/GUID/layout/dpad/source/sdl_mapping); any uncovered GUID goes
+   into `tools\controller_matrix.cpp` as a new case before touching the rules.
+4. Memory card follow-ups: drive the in-game Load menu (automation input) to
+   prove save -> load on screen; decide whether to migrate saves out of the old
+   `GC\<region>\Card A` folder into the raw card (or document a manual copy);
+   note that folder-era savestates re-enable the folder device.
+
 ## Open issues
 
 | Symptom | First PC / log line | Owner | Status |
@@ -119,18 +144,46 @@ Updated: 2026-11-13 (v0.1.2 single-runner launcher parity release)
 
 ## Release
 
-- Version: **v0.1.5** (current; supersedes v0.1.4)
+- Version: **v0.1.7** (prepared, NOT committed/published - awaiting approval);
+  published release is v0.1.5. v0.1.6 (controller-only) was staged and never
+  published; v0.1.7 supersedes it with the memory-card fix folded in.
 - Ship decision (user-approved 2026-11-11): **JIT default, static recomp opt-in
   (experimental)** due to the rare static-core heavy-mode corruption.
-- v0.1.5 adds: **8BitDo Nintendo-layout fix** (per-GUID live SDL a/b detection;
+- v0.1.7 adds the **memory-card fix** (shared pattern with Aggressive Inline):
+  - `Config/Dolphin.ini` gets `[Core] SlotA = 1` (raw card), `SlotB = 255`
+    (none; never 0 = Dummy -> "THE DEVICE IN SLOT B IS NOT SUPPORTED").
+  - `Runtime::Create` (`dolphin_runtime.cpp`, `ForceMemoryCardLayout`) writes
+    those keys, forces them into the live config layer (`Config::SetBase`
+    *after* `UICommon::Init`; doing it before Init crashed 0xC0000005 because
+    the config layers did not exist yet), then
+    `UICommon::CreateDirectories()` -> `UICommon::Init()` (DolphinQt order) so
+    `GC/USA|EUR|JAP` exist before the EXI bus resolves the card path. Applies to
+    every launch, incl. RecompLauncher (which never opens the settings GUI).
+  - Manifest (`docs/release/recomplauncher.json`) seeds `Core/SlotA=1` and
+    `Core/SlotB=255` in ensure/always/new for launcher-only installs.
+  - Verified (fresh user dir, hidden desktop): GC/USA|EUR|JAP created,
+    `effective slot A=1 slot B=255`, `GC/MemoryCardA.USA.raw` = 16,777,216
+    bytes; the game wrote its save (dir + backup entries `GW2E/78//wmed_sys`);
+    card SHA `1E2860E5…DEA52983` unchanged across a second boot (save read and
+    accepted, no `Card A` folder). Staged zip reproduces it (SHA
+    `AB53CE79…FB1433B`, same save entry).
+  - Savestate caveat confirmed: loading `work/states/boot-static.sav` (folder
+    era) restores `MemoryCardFolder` -> both the raw card and
+    `GC/USA/Card A/78-GW2E-__2f__wmed_sys.gci` appear. Test cards on fresh
+    boots, not old states.
+  - Not verified: in-game Load menu driven by script (no automated menu input),
+    so save->load is inferred from the unchanged card, not shown on screen.
+- v0.1.7 also contains the **controller hotfix** (details below): Xbox
+  "not working at all" root cause = v0.1.5 overwrote a real pad profile with the
+  keyboard profile whenever no pad had enumerated yet; and the `a>b => Nintendo`
+  rule is now scoped to 8BitDo (0x2DC8) so PS3/PS2/generic pads keep standard
+  buttons and unmirrored D-pads.
+- Published: **yes** (v0.1.5) - https://github.com/Spaced1127/DOR2-Static-Recomp/releases/tag/v0.1.5
+  (user-approved; commit 69f9a5d, tag v0.1.5). Prior: v0.1.4 (0de9381), v0.1.3 (96de8a8), v0.1.2 (1b5585f), v0.1.1 (c31cb7f), v0.1.0 (7f11135).
+- v0.1.5 added: **8BitDo Nintendo-layout fix** (per-GUID live SDL a/b detection;
   Pro 2/SN30/SF30/N30 Nintendo-mode get A/B+X/Y swapped + reversed D-pad
-  corrected; Ultimate/64 stay standard — no blanket rule) and **DualSense Edge +
-  Xbox Elite S1/S2 support** (standard layout; Edge USB GUID registered at
-  runtime; paddles/Fn ignored). Manual override via launcher Button layout combo
-  / `controller_layout` / `--controller-layout`; default profiles migrate, custom
-  preserved; startup diagnostic name/GUID/VID:PID/layout/dpad + `--list-controllers`.
-  Offline unit tests pass; controllers verified offline (no physical Edge/Elite/
-  8BitDo hardware on the build machine — player confirmation requested).
+  corrected; Ultimate/64 stay standard) and **DualSense Edge +
+  Xbox Elite S1/S2 support**. Defects fixed in v0.1.7 above.
 - v0.1.4 added: **native RVZ support** (no manual RVZ->ISO conversion). Launcher
   picker + DiscIO read `.rvz`; `tools/rvz_extract.py` (zstd + Dolphin LFG padding,
   reused from the guide) decodes RVZ directly to `sys/`+`files/` (legacy
@@ -152,6 +205,21 @@ Updated: 2026-11-13 (v0.1.2 single-runner launcher parity release)
 - Manifest: `docs\release\recomplauncher.json` (validates, 0 errors);
   `prepare` = `DOR2Recomp.exe --extract {game}`; `start` = single runner with
   `--module`/`--user-dir`; `cpu_core=jit` in ensure/new
+- Package (v0.1.7, prepared): `dist\DOR2StaticRecomp-v0.1.7-Windows-x64\` + zip +
+  `SHA256SUMS.txt`; zip SHA-256
+  `b986ad02970eef5dc6abc29ac0f9c0a0834c6fd7acc7cf66c18e875e0df0038c`
+  (superseded staging: v0.1.6 `214c64b2…c43800a1`, never published)
+- Verified (v0.1.7): package game-data scan clean; schema 0 errors (incl. the new
+  `Config/Dolphin.ini` entry); staged exes report 0.1.7.0; staged runner boot on a
+  hidden desktop creates `GC/MemoryCardA.USA.raw` (16,777,216 bytes, SHA
+  `AB53CE79…FB1433B`, save entry `GW2E/78//wmed_sys`), writes the `[memcard]`
+  lines, keeps the controller diagnostic, Vulkan backend up; static core loads
+  the module (`module loaded ... entry=0x80003154`).
+- Not re-measured for v0.1.7: 59.94 fps / `fallback=0` / `smc_failed=0`. No
+  core/emitter/module changes (module hash unchanged); re-run
+  `scripts\run.ps1 -Core static` with a savestate before publishing if a fresh
+  perf line is wanted. Note: a *new* card is created on a fresh user dir, so do
+  not mix old folder-era savestates into a card test (see the savestate caveat).
 - Package: `dist\DOR2StaticRecomp-v0.1.5-Windows-x64\` + zip + `SHA256SUMS.txt`
 - Zip SHA-256 (v0.1.5): `58af3a39f0aa765d298f1a45b2fda58a167793867b3e490eb2fc4a5e45bef975`
   (prior v0.1.4: `8221a18558c0cbdab981a5b16ec8df8fb383f59bfc3029a8f30b21a78fc294c4`)
@@ -159,7 +227,7 @@ Updated: 2026-11-13 (v0.1.2 single-runner launcher parity release)
   staged launcher `--extract` (progress 1.000); staged single-runner JIT boot on a
   hidden desktop (run-hidden.ps1) 59.9403 fps / vps 59.9401 / speed 1; controller
   unit tests pass (8BitDo Nintendo/Ultimate/64/Switch-mode/reversed dpad/no regression).
-- Release notes: `dist\release-notes-v0.1.5.md`
+- Release notes: `dist\release-notes-v0.1.7.md` (superseded: v0.1.6, v0.1.5)
 - Published: **yes** — https://github.com/Spaced1127/DOR2-Static-Recomp/releases/tag/v0.1.5
   (user-approved; commit 69f9a5d, tag v0.1.5). Prior: v0.1.4 (0de9381), v0.1.3 (96de8a8), v0.1.2 (1b5585f), v0.1.1 (c31cb7f), v0.1.0 (7f11135).
 - `repo` field: `Spaced1127/DOR2-Static-Recomp`
@@ -175,6 +243,12 @@ Updated: 2026-11-13 (v0.1.2 single-runner launcher parity release)
   `docs/ASSETS.md` — review before redistributing.
 
 ## Notes
+
+- **Quiet mode lifted (user directive 2026-11-16):** run test apps as normal
+  VISIBLE windows. Do not use `H:\Orchestration\tools\run-hidden.ps1` or any
+  hidden-desktop/minimize/kill-window trick for test runs. End test runs with the
+  automation `command=stop` file (`--automation-dir <dir>`, write
+  `<dir>\commands\stop.txt`), which exits gracefully and flushes the memory card.
 
 - Inherited scaffold (prior agent): project structure, scripts, manifest,
   branding, first boot evidence. Takeover added: settings implementation,

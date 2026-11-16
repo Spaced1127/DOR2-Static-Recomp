@@ -63,18 +63,44 @@ profile (A/B and X/Y swapped) so the buttons match the printed labels. This is
 standard layout and stay standard. A firmware that reports a reversed D-pad
 left/right is corrected automatically.
 
+Since v0.1.6 the swap rule applies **only to 8BitDo pads** (USB vendor 0x2DC8).
+Xbox, PlayStation and every other pad are always standard, so a PS3/PS2 pad or an
+arcade stick can never end up with swapped face buttons or a mirrored D-pad.
+
+### If your pad is not detected (v0.1.6)
+
+**Switch the pad on *before* you press Play.** If the runner starts and no pad
+has been enumerated yet (a wireless Xbox pad that is off/asleep, or one that is
+still pairing), it now **keeps your existing controller profile** and says so:
+
+```
+controller: name="none" ... source=none profile=kept (SDL/0/Xbox Wireless Controller);
+no SDL gamepad detected this boot
+controller:   switch the pad on before launching, then relaunch; run with
+--list-controllers to check detection
+```
+
+v0.1.5 wrote a keyboard-only profile in that situation, which is why Xbox pads
+appeared to stop working entirely. If you are stuck on a keyboard profile from
+v0.1.5, just boot once with the pad switched on: the profile is regenerated for
+the pad automatically (or delete `Config\GCPadNew.ini`).
+
+The runner also waits up to 0.8 s for a pad to finish enumerating before it
+decides nothing is connected.
+
 ### Checking your pad
 
 Run `DOR2RecompRunner.exe --list-controllers` (no game starts). It prints one
 diagnostic line per pad, also written to `Logs\ModernGekko.log` at game startup:
 
 ```
-controller: name="<device>" guid=<32-hex> vid=<vid> pid=<pid> layout=<auto|standard|nintendo|keyboard> dpad=<normal|swapped>
+controller: name="<device>" guid=<32-hex> vid=<vid> pid=<pid> layout=<auto|standard|nintendo|keyboard> dpad=<normal|swapped> source=<sdl|keyboard>
 controller:   sdl_mapping=<SDL binding string>
+controller: profile=<kept|generated> (<device>) layout=<layout> dpad=<dpad>
 ```
 
-If a pad is not detected or maps incorrectly, send that line (name + GUID +
-`sdl_mapping`) so the exact GUID variant can be handled.
+If a pad is not detected or maps incorrectly, send those lines (name + GUID +
+`layout` + `sdl_mapping`) so the exact GUID variant can be handled.
 
 ### Manual layout override
 
@@ -97,14 +123,30 @@ not respond to the D-pad, use the left stick.
 
 ## Saving
 
-The port uses a folder memory card, not a card image:
+The port uses a **raw 128 Mbit memory card in slot A** and an empty slot B
+(since v0.1.7): the same card format and size Dolphin uses for a real 16 MiB
+card.
 
 ```
-<user folder>\GC\US\Card A\*.gci
+<user folder>\GC\MemoryCardA.<region>.raw      16,777,216 bytes, e.g. .USA.raw
 ```
 
-You can copy `.gci` files from Dolphin into that folder. Savestates are written
-with F1 under `<user folder>\StateSaves\`.
+The card is created automatically on the first boot (the game formats it and
+writes its save). Close the game normally, or let it return to the title, so the
+card is flushed.
+
+- Back it up by copying that single `.raw` file. Do not rename the region part
+  (`.USA`, `.EUR`, `.JAP`) - the game's region decides which file is opened.
+- To import a Dolphin card, copy your 16 MiB `.raw` card to that path.
+- Slot B is deliberately empty. A non-card device in slot B stops the game with
+  "THE DEVICE IN SLOT B IS NOT SUPPORTED".
+
+Savestates are written with F1 under `<user folder>\StateSaves\`.
+
+**Savestate caveat:** savestates made before v0.1.7 stored the old GCI-folder
+device, and loading one switches slot A back to the folder for that session, so
+the game writes `GC\<region>\Card A\*.gci` instead of the raw card. Start a
+normal boot when you want the raw card; the card file itself is not damaged.
 
 ## Performance
 

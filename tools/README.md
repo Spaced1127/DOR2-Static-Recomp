@@ -11,7 +11,8 @@ These scripts are diagnostic helpers copied from the
 | `verify_dol.py` | Compare every `main.dol` copy against the disc |
 | `dol_disasm.py` | Disassemble a DOL at a virtual address (Capstone) |
 | `validate_manifest.py` | Validate a RecompLauncher manifest against the schema |
-| `test_controller_layouts.py` | Offline proof that Edge/Elite/standard GUIDs map to standard-equivalent GameCube layouts |
+| `test_controller_layouts.py` | Offline proof that Edge/Elite/standard GUIDs map to standard-equivalent GameCube layouts (DB audit) |
+| `controller_matrix.cpp` | Offline layout matrix: runs the real `DetectControllerMapping`/`GenerateControllerConfig` against the real SDL gamepad DB rows for Xbox 360/One/Series, Elite S1/S2, DualSense/Edge, 8BitDo Pro 2/Ultimate/64, Switch Pro, PS3/PS2 and asserts the GameCube layout per pad. Built and run by `scripts\test-controller-matrix.ps1` |
 
 ## Examples
 
@@ -26,6 +27,12 @@ python tools\gcdisc.py list work\disc\game.iso sound
 python tools\gcdisc.py extract work\disc\game.iso work\disc\raw
 python tools\validate_manifest.py docs\recomplauncher.schema.json `
   docs\release\recomplauncher.json
+
+# Controller gates (no controller hardware needed)
+powershell -ExecutionPolicy Bypass -File scripts\test-controller-matrix.ps1
+python tools\test_controller_layouts.py
+# Real runner on a hidden desktop: a pad profile must survive a boot with no pad
+powershell -ExecutionPolicy Bypass -File scripts\test-controller-profile.ps1
 ```
 
 Requirements: Python 3, `zstandard` for RVZ, `jsonschema` for manifests,

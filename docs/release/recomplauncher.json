@@ -31,6 +31,27 @@
   },
   "config": [
     {
+      "id": "dolphin",
+      "format": "ini",
+      "file": [
+        {
+          "path": "{local}/DOR2Recomp/Config/Dolphin.ini"
+        }
+      ],
+      "ensure": {
+        "Core/SlotA": "1",
+        "Core/SlotB": "255"
+      },
+      "always": {
+        "Core/SlotA": "1",
+        "Core/SlotB": "255"
+      },
+      "new": {
+        "Core/SlotA": "1",
+        "Core/SlotB": "255"
+      }
+    },
+    {
       "id": "main",
       "format": "ini",
       "file": [
