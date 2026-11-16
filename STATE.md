@@ -136,10 +136,17 @@ code/analysis/build/docs work is allowed.
 5. [host only] Memory-card follow-ups: decide whether to migrate saves out of the
    old `GC\<region>\Card A` folder into the raw card (or document a manual copy);
    folder-era savestates re-enable the folder device (documented).
-6. [host only] Netplay path: `ForceMemoryCardLayout` and
-   `UICommon::CreateDirectories()` are skipped when `s_external_ui_common` is set
-   (external UICommon owner); confirm whether the netplay launcher path needs its
-   own slot forcing.
+6. [host only] Netplay path (CONFIRMED gap, not fixed - v0.1.7 matches the
+   published tag and an unverified code change will not be committed):
+   `tools/netplay_session.cpp:524` calls `UICommon::SetUserDirectory()` +
+   `UICommon::Init()` itself and then `detail::SetExternalUICommon(true)`, so
+   `Runtime::Create` skips `ForceMemoryCardLayout()` and
+   `UICommon::CreateDirectories()`. Netplay therefore still runs slot A on the
+   GCI-folder default and may resolve the card path before `GC/<region>` exists.
+   Planned fix when launches are allowed again: call the same helper and
+   `UICommon::CreateDirectories()` between `SetUserDirectory` and `Init` in
+   `RunNetplayLobby`, then verify a netplay host/join boot writes into
+   `GC/MemoryCardA.<region>.raw` and not `GC/<region>/Card A`.
 
 ## Open issues
 
