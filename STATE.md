@@ -144,9 +144,8 @@ Updated: 2026-11-16 (v0.1.6 controller hotfix, pending approval)
 
 ## Release
 
-- Version: **v0.1.7** (prepared, NOT committed/published - awaiting approval);
-  published release is v0.1.5. v0.1.6 (controller-only) was staged and never
-  published; v0.1.7 supersedes it with the memory-card fix folded in.
+- Version: **v0.1.7** (published 2026-11-16). Supersedes v0.1.5. v0.1.6
+  (controller-only) was staged and never published; v0.1.7 contains both fixes.
 - Ship decision (user-approved 2026-11-11): **JIT default, static recomp opt-in
   (experimental)** due to the rare static-core heavy-mode corruption.
 - v0.1.7 adds the **memory-card fix** (shared pattern with Aggressive Inline):
@@ -178,8 +177,11 @@ Updated: 2026-11-16 (v0.1.6 controller hotfix, pending approval)
   keyboard profile whenever no pad had enumerated yet; and the `a>b => Nintendo`
   rule is now scoped to 8BitDo (0x2DC8) so PS3/PS2/generic pads keep standard
   buttons and unmirrored D-pads.
-- Published: **yes** (v0.1.5) - https://github.com/Spaced1127/DOR2-Static-Recomp/releases/tag/v0.1.5
-  (user-approved; commit 69f9a5d, tag v0.1.5). Prior: v0.1.4 (0de9381), v0.1.3 (96de8a8), v0.1.2 (1b5585f), v0.1.1 (c31cb7f), v0.1.0 (7f11135).
+- Published: **yes** (v0.1.7) - https://github.com/Spaced1127/DOR2-Static-Recomp/releases/tag/v0.1.7
+  (user-approved 2026-11-16; commit 1c083a1, tag v0.1.7, assets
+  `DOR2StaticRecomp-v0.1.7-Windows-x64.zip` + `SHA256SUMS.txt`).
+  Prior: v0.1.5 (69f9a5d), v0.1.4 (0de9381), v0.1.3 (96de8a8), v0.1.2 (1b5585f),
+  v0.1.1 (c31cb7f), v0.1.0 (7f11135).
 - v0.1.5 added: **8BitDo Nintendo-layout fix** (per-GUID live SDL a/b detection;
   Pro 2/SN30/SF30/N30 Nintendo-mode get A/B+X/Y swapped + reversed D-pad
   corrected; Ultimate/64 stay standard) and **DualSense Edge +
@@ -231,6 +233,10 @@ Updated: 2026-11-16 (v0.1.6 controller hotfix, pending approval)
 - Published: **yes** — https://github.com/Spaced1127/DOR2-Static-Recomp/releases/tag/v0.1.5
   (user-approved; commit 69f9a5d, tag v0.1.5). Prior: v0.1.4 (0de9381), v0.1.3 (96de8a8), v0.1.2 (1b5585f), v0.1.1 (c31cb7f), v0.1.0 (7f11135).
 - `repo` field: `Spaced1127/DOR2-Static-Recomp`
+- Download-back verified (v0.1.7): asset SHA-256 matches `SHA256SUMS.txt` and the
+  local build (`151206e5…f96c55`, 33,764,697 bytes); release public, not a draft;
+  assets: zip + SHA256SUMS only; game-data scan clean on the downloaded zip.
+- Release notes published from `dist\release-notes-v0.1.7.md`.
 - Download-back verified (v0.1.5): zip sha256 matches SHA256SUMS; recomplauncher.json
   at top; parity layout (no Play.cmd/RunnerCore/Prepare); identical DOR2 icon on
   both exes; game-data scan clean; schema 0 errors.
