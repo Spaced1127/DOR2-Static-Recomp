@@ -42,3 +42,4 @@ The shipped launcher (`DOR2Recomp.exe`) extracts ISO **and RVZ** natively via
 Dolphin's DiscIO (no Python at play time). The dev extractor `DOR2Prepare.exe`
 handles ISO in native C++ and delegates RVZ to `tools/rvz_extract.py`, so
 `scripts\recompile.ps1 -Iso <disc.rvz>` works with no manual conversion.
+| `test-memcard.ps1` (scripts/) | Memory-card lifecycle gate: fresh-dir raw slot A card created (16,777,216 B), game save entry present, card reused byte-identical on the second boot. Authored, not yet executed (launch pause). |

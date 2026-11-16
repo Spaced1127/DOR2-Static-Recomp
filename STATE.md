@@ -118,18 +118,28 @@ Updated: 2026-11-16 (v0.1.6 controller hotfix, pending approval)
 
 ## Next actions
 
-1. Await hub/user approval, then commit + tag v0.1.7 and publish the prepared
-   `dist\DOR2StaticRecomp-v0.1.7-Windows-x64.zip` (hash above), and download it
-   back for the release-gate verification.
-2. Optional fresh perf line for v0.1.7: static boot with a savestate, capture
-   `status.txt` (fps/vps/speed) and `fallback=0`/`smc_failed=0`.
-3. Ask players for the `controller:` diagnostic lines from pads that still
-   misbehave (name/GUID/layout/dpad/source/sdl_mapping); any uncovered GUID goes
-   into `tools\controller_matrix.cpp` as a new case before touching the rules.
-4. Memory card follow-ups: drive the in-game Load menu (automation input) to
-   prove save -> load on screen; decide whether to migrate saves out of the old
-   `GC\<region>\Card A` folder into the raw card (or document a manual copy);
-   note that folder-era savestates re-enable the folder device.
+**LAUNCH PAUSE (hub directive, 2026-11-16):** the user is at the machine - do NOT
+launch anything (no game runner, launcher, Ryujinx, no windows, no audio) until
+the hub lifts the pause. Everything below that needs a launch is BLOCKED; only
+code/analysis/build/docs work is allowed.
+
+1. [BLOCKED - launch] Drive the in-game Load menu with automation pad input to
+   prove save -> load on screen (currently inferred from the unchanged card
+   across boots).
+2. [BLOCKED - launch] Run `scripts\test-memcard.ps1` (authored, never executed:
+   fresh-dir card lifecycle gate) once the pause lifts.
+3. [BLOCKED - launch] Optional fresh perf line for v0.1.7: static boot with a
+   savestate, capture `status.txt` (fps/vps/speed) and `fallback=0`/`smc_failed=0`.
+4. [host only] Ask players for the `controller:` diagnostic lines from pads that
+   still misbehave (name/GUID/layout/dpad/source/sdl_mapping); any uncovered GUID
+   goes into `tools\controller_matrix.cpp` as a new case before touching the rules.
+5. [host only] Memory-card follow-ups: decide whether to migrate saves out of the
+   old `GC\<region>\Card A` folder into the raw card (or document a manual copy);
+   folder-era savestates re-enable the folder device (documented).
+6. [host only] Netplay path: `ForceMemoryCardLayout` and
+   `UICommon::CreateDirectories()` are skipped when `s_external_ui_common` is set
+   (external UICommon owner); confirm whether the netplay launcher path needs its
+   own slot forcing.
 
 ## Open issues
 
@@ -250,11 +260,17 @@ Updated: 2026-11-16 (v0.1.6 controller hotfix, pending approval)
 
 ## Notes
 
-- **Quiet mode lifted (user directive 2026-11-16):** run test apps as normal
-  VISIBLE windows. Do not use `H:\Orchestration\tools\run-hidden.ps1` or any
-  hidden-desktop/minimize/kill-window trick for test runs. End test runs with the
-  automation `command=stop` file (`--automation-dir <dir>`, write
-  `<dir>\commands\stop.txt`), which exits gracefully and flushes the memory card.
+- **Launch pause (hub directive 2026-11-16, in force):** no launches at all -
+  no runner, launcher, Ryujinx, no test windows and no audio while the user is at
+  the machine, until the hub lifts it. Host-side work only (code, analysis,
+  builds without GUI, docs). Test cycles suspended; blocked actions are listed
+  under "Next actions".
+- **Quiet mode lifted (user directive 2026-11-16):** when launches ARE allowed
+  again, run test apps as normal VISIBLE windows. Do not use
+  `H:\Orchestration\tools\run-hidden.ps1` or any hidden-desktop/minimize/
+  kill-window trick. End test runs with the automation `command=stop` file
+  (`--automation-dir <dir>`, write `<dir>\commands\stop.txt`), which exits
+  gracefully and flushes the memory card.
 
 - Inherited scaffold (prior agent): project structure, scripts, manifest,
   branding, first boot evidence. Takeover added: settings implementation,
