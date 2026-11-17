@@ -254,6 +254,13 @@ code/analysis/build/docs work is allowed.
   local build (`151206e5…f96c55`, 33,764,697 bytes); release public, not a draft;
   assets: zip + SHA256SUMS only; game-data scan clean on the downloaded zip.
 - Release notes published from `dist\release-notes-v0.1.7.md`.
+- Release notes amended 2026-11-16 (text only, assets untouched) to state
+  explicitly: profile rewrite only with a pad present, device fallback, SDL hint
+  parity, 8BitDo scoping, DualSense/Edge D-pad un-mirrored, Elite S2 `0B22`,
+  memcard migration for existing installs, the unverified in-game Load path, and
+  the "send us your controller line" ask. No rebuild was needed: the packaged
+  payload (runner, module, `recomplauncher.json`, `PLAYERS.md`) hashes are
+  identical to the final tree, so v0.1.7 already *is* the combined artifact.
 - Download-back verified (v0.1.5): zip sha256 matches SHA256SUMS; recomplauncher.json
   at top; parity layout (no Play.cmd/RunnerCore/Prepare); identical DOR2 icon on
   both exes; game-data scan clean; schema 0 errors.
