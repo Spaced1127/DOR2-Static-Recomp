@@ -192,6 +192,16 @@ code/analysis/build/docs work is allowed.
     packaged artifact boots 59.93 fps / vps 59.9401 with memcard intact.
   - Not verified: physical A/B/X/Y presses per family (no Switch/8BitDo here)
     and a real unplug/replug hot-plug; the watcher uses the same binding path.
+- v0.1.9 also carries the hub's real-hardware validation of the reference
+  (WMX8 v0.1.4 with a physical Xbox pad: bind + buttons work). This build
+  reproduces that path and was checked here on a physical Xbox One Controller
+  (`045e:02ff`, `sdl_type=3` -> positional, profile SHA stable across boots).
+  PlayStation pads were working under the old design and stay on the same
+  positional path: `sdl_type` 4/5/6 (PS3/PS4/PS5) map to positional in the
+  offline matrix, and every positional pad gets the identical canonical
+  binding set, so the Xbox-validated profile is the PlayStation profile too.
+  No live PlayStation pad was attached for this check (the DualSense used
+  earlier in the session was disconnected).
 - Package (v0.1.9): zip SHA-256
   `77503e23370a27d6ef9fdc3b5ee166cc7c29395d670147c9f57ef10dfe3cc1f5`; exes
   0.1.9.0; game-data scan clean; boot smoke from the expanded zip above.
