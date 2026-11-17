@@ -22,10 +22,10 @@ param(
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $tools = Join-Path $root 'lib\ModernGekko-Template\lib\ModernGekko\tools'
-$db = Join-Path $root 'lib\ModernGekko-Template\lib\ModernGekko\vendor\dolphin\Externals\SDL\SDL\src\joystick\SDL_gamepad_db.h'
+$sdl_inc = Join-Path $root 'lib\ModernGekko-Template\lib\ModernGekko\vendor\dolphin\Source\Core\InputCommon\ControllerInterface\SDL'
 $out = Join-Path $root $BuildDir
 
-if (-not (Test-Path $db)) { throw "SDL gamepad DB not found: $db" }
+if (-not (Test-Path $sdl_inc)) { throw "SDL input layer not found: $sdl_inc" }
 
 # MSVC environment (the submodule is built with VS Build Tools; keep the ABI and
 # the standard library identical to the shipped runner).
@@ -46,7 +46,7 @@ call "$vcvars" >nul 2>&1
 cd /d "$out"
 cl /nologo /std:c++latest /W4 /EHsc /O2 /D_HAS_EXCEPTIONS=1 ^
    /DMODERNGEKKO_GAMECUBE_CONTROLLERS=1 ^
-   /I"$tools" ^
+   /I"$tools" /I"$sdl_inc" ^
    "$src" "$impl" /Fe:"$exe"
 "@
 $cmdFile = Join-Path $out 'build.cmd'
@@ -60,7 +60,7 @@ $build | Where-Object { $_ -match 'warning|error' } | ForEach-Object { Write-Hos
 
 Push-Location $root
 try {
-    & $exe $db
+    & $exe
     $code = $LASTEXITCODE
 } finally {
     Pop-Location

@@ -1,0 +1,236 @@
+diff --git a/Source/Core/InputCommon/ControllerInterface/SDL/LayoutClass.h b/Source/Core/InputCommon/ControllerInterface/SDL/LayoutClass.h
+new file mode 100644
+index 0000000..26ae307
+--- /dev/null
++++ b/Source/Core/InputCommon/ControllerInterface/SDL/LayoutClass.h
+@@ -0,0 +1,71 @@
++// Copyright 2025 Dolphin Emulator Project
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++#pragma once
++
++#include <atomic>
++
++// Canonical controller layout classes, shared by the SDL input layer and the
++// runtime. Deliberately free of SDL types so any host component can include it.
++//
++// Positional binds the GameCube pad to the SDL button *position* (south, east,
++// west, north). Nintendo swaps A<->B and X<->Y so the printed labels match.
++// D-pad, sticks and triggers are never swapped. The class is resolved once per
++// pad at input init; no controller profile is read or written to pick it.
++namespace ciface::SDL
++{
++enum class LayoutClass
++{
++  Positional,
++  Nintendo,
++};
++
++namespace detail
++{
++// Header-only on purpose: the override has to be visible to the input layer and
++// to the runtime without adding a link dependency between them.
++inline std::atomic<int>& LayoutClassOverride()
++{
++  static std::atomic<int> value{-1};
++  return value;
++}
++}  // namespace detail
++
++// override_class: -1 = auto (per pad), 0 = force positional, 1 = force nintendo.
++inline void SetLayoutClassOverride(int override_class)
++{
++  detail::LayoutClassOverride().store(override_class);
++}
++
++inline int GetLayoutClassOverride()
++{
++  return detail::LayoutClassOverride().load();
++}
++
++inline const char* LayoutClassName(LayoutClass layout_class)
++{
++  return layout_class == LayoutClass::Nintendo ? "nintendo" : "positional";
++}
++
++// The whole decision, without SDL types so the host tools can unit-test it:
++//   override_class         -1 auto, 0 positional, 1 nintendo
++//   sdl_gamepad_type       an SDL_GamepadType value as int
++//   eightbitdo_switch_clone  the vendor/product fallback matched
++// Nintendo Switch family types are authoritative; everything else is positional
++// unless it is a known 8BitDo Switch-mode clone that reports an unknown type.
++inline LayoutClass ResolveLayoutClass(int override_class, int sdl_gamepad_type,
++                                      bool eightbitdo_switch_clone)
++{
++  if (override_class == 0)
++    return LayoutClass::Positional;
++  if (override_class == 1)
++    return LayoutClass::Nintendo;
++  // SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO(7) .. JOYCON_PAIR(10) in SDL 3.4; the
++  // whole block is Nintendo so a future Joy-Con variant stays correct.
++  if (sdl_gamepad_type >= 7 && sdl_gamepad_type <= 10)
++    return LayoutClass::Nintendo;
++  if (eightbitdo_switch_clone)
++    return LayoutClass::Nintendo;
++  return LayoutClass::Positional;
++}
++}  // namespace ciface::SDL
+\ No newline at end of file
+diff --git a/Source/Core/InputCommon/ControllerInterface/SDL/SDLGamepad.cpp b/Source/Core/InputCommon/ControllerInterface/SDL/SDLGamepad.cpp
+index 0945759..47b9acf 100644
+--- a/Source/Core/InputCommon/ControllerInterface/SDL/SDLGamepad.cpp
++++ b/Source/Core/InputCommon/ControllerInterface/SDL/SDLGamepad.cpp
+@@ -4,6 +4,7 @@
+ #include "InputCommon/ControllerInterface/SDL/SDLGamepad.h"
+ 
+ #include <array>
++#include <cstring>
+ #include <span>
+ #include <unordered_set>
+ 
+@@ -19,8 +20,73 @@ static bool IsTriggerAxis(int index)
+   return index >= 4;
+ }
+ 
++// Canonical layout classes: the whole per-pad decision lives here, so no
++// controller profile, GUID table or name heuristic can decide button order.
++namespace
++{
++// 8BitDo pads in Switch mode normally report SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO.
++// Some firmware revisions report UNKNOWN, so fall back to vendor/product words
++// the pads present in that mode. Extend only with GUIDs observed on real
++// hardware (each entry is a claim the offline matrix cannot verify).
++bool IsEightBitDoSwitchClone(SDL_Gamepad* const gamepad)
++{
++  if (!gamepad)
++    return false;
++  SDL_Joystick* const joystick = SDL_GetGamepadJoystick(gamepad);
++  if (!joystick)
++    return false;
++  char text[33]{};
++  SDL_GUIDToString(SDL_GetJoystickGUID(joystick), text, sizeof(text));
++  struct VendorProduct
++  {
++    const char* vendor;
++    const char* product;
++  };
++  // Vendor/product words as they appear in the GUID string (little-endian pairs).
++  static constexpr VendorProduct kSwitchClones[] = {
++      {"ac05", "0400"},  // 05ac:0004 - 8BitDo Switch-mode report over Bluetooth
++      {"c82d", "0400"},  // 2dc8:0004 - 8BitDo Switch-mode report, USB variant
++  };
++  for (const VendorProduct& clone : kSwitchClones)
++  {
++    if (std::strncmp(text + 8, clone.vendor, 4) == 0 &&
++        std::strncmp(text + 16, clone.product, 4) == 0)
++      return true;
++  }
++  return false;
++}
++}  // namespace
++
++LayoutClass ClassifyGamepad(SDL_Gamepad* const gamepad)
++{
++  const int type = gamepad ? static_cast<int>(SDL_GetGamepadType(gamepad))
++                           : static_cast<int>(SDL_GAMEPAD_TYPE_UNKNOWN);
++  return ResolveLayoutClass(GetLayoutClassOverride(), type,
++                            IsEightBitDoSwitchClone(gamepad));
++}
++
++SDL_GamepadButton ResolveLayoutButton(LayoutClass layout_class, SDL_GamepadButton button)
++{
++  if (layout_class != LayoutClass::Nintendo)
++    return button;
++  switch (button)
++  {
++  case SDL_GAMEPAD_BUTTON_SOUTH:
++    return SDL_GAMEPAD_BUTTON_EAST;
++  case SDL_GAMEPAD_BUTTON_EAST:
++    return SDL_GAMEPAD_BUTTON_SOUTH;
++  case SDL_GAMEPAD_BUTTON_WEST:
++    return SDL_GAMEPAD_BUTTON_NORTH;
++  case SDL_GAMEPAD_BUTTON_NORTH:
++    return SDL_GAMEPAD_BUTTON_WEST;
++  default:
++    return button;
++  }
++}
++
+ Gamepad::Gamepad(SDL_Gamepad* const gamepad, SDL_Joystick* const joystick)
+-    : m_gamepad(gamepad), m_joystick(joystick)
++    : m_gamepad(gamepad), m_joystick(joystick),
++      m_layout_class(ClassifyGamepad(gamepad))
+ {
+   const char* const sdl_name =
+       (gamepad != nullptr) ? SDL_GetGamepadName(gamepad) : SDL_GetJoystickName(joystick);
+@@ -64,7 +130,7 @@ Gamepad::Gamepad(SDL_Gamepad* const gamepad, SDL_Joystick* const joystick)
+       switch (binding->output_type)
+       {
+       case SDL_GAMEPAD_BINDTYPE_BUTTON:
+-        AddInput(new Button(gamepad, *binding));
++        AddInput(new Button(gamepad, *binding, m_layout_class));
+         break;
+       case SDL_GAMEPAD_BINDTYPE_AXIS:
+       {
+@@ -301,7 +367,7 @@ std::string Gamepad::Axis::GetName() const
+ 
+ ControlState Gamepad::Button::GetState() const
+ {
+-  return SDL_GetGamepadButton(m_gc, m_binding.output.button);
++  return SDL_GetGamepadButton(m_gc, ResolveLayoutButton(m_layout_class, m_binding.output.button));
+ }
+ 
+ ControlState Gamepad::Axis::GetState() const
+diff --git a/Source/Core/InputCommon/ControllerInterface/SDL/SDLGamepad.h b/Source/Core/InputCommon/ControllerInterface/SDL/SDLGamepad.h
+index 0a43186..2650950 100644
+--- a/Source/Core/InputCommon/ControllerInterface/SDL/SDLGamepad.h
++++ b/Source/Core/InputCommon/ControllerInterface/SDL/SDLGamepad.h
+@@ -11,6 +11,7 @@
+ #include "Common/MathUtil.h"
+ 
+ #include "InputCommon/ControllerInterface/CoreDevice.h"
++#include "InputCommon/ControllerInterface/SDL/LayoutClass.h"
+ 
+ namespace
+ {
+@@ -42,6 +43,11 @@ static_assert(GetDirectionFromHatMask(SDL_HAT_LEFT) == 3);
+ namespace ciface::SDL
+ {
+ 
++// Canonical layout class resolution (see LayoutClass.h). ClassifyGamepad is
++// resolved once per pad when the device is created.
++LayoutClass ClassifyGamepad(SDL_Gamepad* gamepad);
++SDL_GamepadButton ResolveLayoutButton(LayoutClass layout_class, SDL_GamepadButton button);
++
+ class Gamepad : public Core::Device
+ {
+ private:
+@@ -50,13 +56,17 @@ private:
+   {
+   public:
+     std::string GetName() const override;
+-    Button(SDL_Gamepad* gc, const SDL_GamepadBinding& binding) : m_gc(gc), m_binding(binding) {}
++    Button(SDL_Gamepad* gc, const SDL_GamepadBinding& binding, LayoutClass layout_class)
++        : m_gc(gc), m_binding(binding), m_layout_class(layout_class)
++    {
++    }
+     ControlState GetState() const override;
+     bool IsMatchingName(std::string_view name) const override;
+ 
+   private:
+     SDL_Gamepad* const m_gc;
+     const SDL_GamepadBinding m_binding;
++    const LayoutClass m_layout_class;
+   };
+ 
+   class Axis : public Core::Device::Input
+@@ -364,6 +374,9 @@ private:
+   SDL_Gamepad* const m_gamepad;
+   std::string m_name;
+   SDL_Joystick* const m_joystick;
++  // Resolved once in the constructor (SDL type + the 8BitDo Switch-mode
++  // fallback + the user override); read per button poll without re-classifying.
++  const LayoutClass m_layout_class;
+   SDL_Haptic* m_haptic = nullptr;
+   ControlState m_battery_value;
+   float m_touchpad_x = 0.f;

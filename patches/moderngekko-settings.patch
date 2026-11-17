@@ -14,7 +14,7 @@ index c0548a0..c1b6b32 100644
  
      # Header-only, so the test needs no companion translation unit.
 diff --git a/include/moderngekko/runtime.hpp b/include/moderngekko/runtime.hpp
-index 0adc855..6c2f92d 100644
+index 0adc855..05a21ee 100644
 --- a/include/moderngekko/runtime.hpp
 +++ b/include/moderngekko/runtime.hpp
 @@ -32,12 +32,20 @@ struct GraphicsSettings
@@ -38,17 +38,21 @@ index 0adc855..6c2f92d 100644
  };
  
  struct InputSettings
-@@ -70,6 +78,8 @@ struct RuntimeConfig
+@@ -70,6 +78,12 @@ struct RuntimeConfig
    bool headless = false;
    bool fullscreen = false;
    bool allow_interpreter = false;
 +  std::optional<double> emulation_speed;
 +  std::string cpu_core;
++  // Controller layout class: "auto" (per pad, from the SDL gamepad type),
++  // "positional" or "nintendo". Applies inside the SDL input layer; the
++  // controller profile file is never touched.
++  std::string controller_class = "auto";
    bool show_fps_in_title = true;
    std::optional<std::string> window_title;
    // Boot straight into a savestate instead of from the title screen.
 diff --git a/src/runtime/dolphin_runtime.cpp b/src/runtime/dolphin_runtime.cpp
-index f9b5405..beb6a31 100644
+index f9b5405..e60c491 100644
 --- a/src/runtime/dolphin_runtime.cpp
 +++ b/src/runtime/dolphin_runtime.cpp
 @@ -3,6 +3,7 @@
@@ -59,7 +63,27 @@ index f9b5405..beb6a31 100644
  #include "Common/StringUtil.h"
  #include "Core/Boot/Boot.h"
  #include "Core/Boot/BootManager.h"
-@@ -95,11 +96,13 @@ std::string FormatWindowTitle(const std::string &title, double fps) {
+@@ -10,6 +11,7 @@
+ #include "Core/Config/MainSettings.h"
+ #include "Core/Core.h"
+ #include "Core/HW/GBACore.h"
++#include "Core/HW/GCPad.h"
+ #include "Core/HW/Memmap.h"
+ #include "Core/Host.h"
+ #include "Core/NetPlay/NetPlayClient.h"
+@@ -19,7 +21,11 @@
+ #include "Core/State.h"
+ #include "Core/System.h"
+ #include "DolphinNoGUI/Platform.h"
++#include "InputCommon/ControllerInterface/ControllerInterface.h"
++#include "InputCommon/ControllerEmu/ControllerEmu.h"
++#include "InputCommon/InputConfig.h"
+ #include "InputCommon/ControllerInterface/Touch/InputOverrider.h"
++#include "InputCommon/ControllerInterface/SDL/LayoutClass.h"
+ #include "UICommon/UICommon.h"
+ #include "VideoCommon/FrameDumper.h"
+ #include "VideoCommon/PerformanceMetrics.h"
+@@ -95,11 +101,13 @@ std::string FormatWindowTitle(const std::string &title, double fps) {
                       s_net_wait_ms_per_second, telemetry.buffer_size);
  }
  
@@ -78,7 +102,7 @@ index f9b5405..beb6a31 100644
    if (static_recomp)
      return PowerPC::CPUCore::StaticRecomp;
  #ifdef _M_ARM_64
-@@ -108,6 +111,31 @@ PowerPC::CPUCore SelectCPUCore() {
+@@ -108,6 +116,31 @@ PowerPC::CPUCore SelectCPUCore() {
    return PowerPC::CPUCore::JIT64;
  #endif
  }
@@ -110,7 +134,53 @@ index f9b5405..beb6a31 100644
  } // namespace
  
  std::vector<std::string> Host_GetPreferredLocales() { return {}; }
-@@ -177,6 +205,49 @@ void EnsureAutomationDirectories(const std::filesystem::path& root)
+@@ -167,6 +200,45 @@ struct RuntimeAutomationState
+   std::string last_error;
+ };
+ 
++// Resolves the GameCube pad device without touching GCPadNew.ini: if the
++// configured device is absent, the first enumerated *gamepad* becomes the
++// emulated controller's default device. A pad that appears later (hot-plug)
++// resolves through the same call, so no profile is ever rewritten at launch.
++//
++// The reference build called GetDefaultDeviceString() here, which on Windows
++// returns the DInput keyboard ("DInput/0/Keyboard Mouse") because that backend
++// enumerates first - a stale or absent pad profile then bound the keyboard and
++// the pad produced nothing. Prefer any SDL (gamepad) device instead.
++std::string FirstGamepadDevice()
++{
++  // Dolphin's own device strings, so the bound name matches the profile format
++  // exactly ("SDL/<index>/<name>"). SDL devices are the gamepads; DInput is the
++  // keyboard/mouse backend.
++  for (const std::string& device : g_controller_interface.GetAllDeviceStrings())
++  {
++    if (device.starts_with("SDL/"))
++      return device;
++  }
++  return {};
++}
++
++void EnsurePadBound()
++{
++  InputConfig* config = Pad::GetConfig();
++  if (!config || config->GetControllerCount() <= 0)
++    return;
++  ControllerEmu::EmulatedController* pad = config->GetController(0);
++  if (!pad || pad->IsDefaultDeviceConnected())
++    return;
++  const std::string device = FirstGamepadDevice();
++  if (device.empty())
++    return;
++  pad->SetDefaultDevice(device);
++  pad->UpdateReferences(g_controller_interface);
++  std::fprintf(stderr, "controller: configured device missing; bound \"%s\"\n",
++               device.c_str());
++}
++
+ void EnsureAutomationDirectories(const std::filesystem::path& root)
+ {
+   if (root.empty())
+@@ -177,6 +249,49 @@ void EnsureAutomationDirectories(const std::filesystem::path& root)
    std::filesystem::create_directories(root / "failed", ec);
  }
  
@@ -160,7 +230,7 @@ index f9b5405..beb6a31 100644
  void SetAutomationError(RuntimeAutomationState& state, std::string message)
  {
    std::lock_guard lock(state.mutex);
-@@ -609,9 +680,24 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+@@ -609,9 +724,24 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
  
    if (!s_external_ui_common) {
      UICommon::SetUserDirectory(impl->config.user_directory.string());
@@ -185,7 +255,25 @@ index f9b5405..beb6a31 100644
    Config::SetBase(Config::MAIN_FULLSCREEN, impl->config.fullscreen);
  
    if (impl->config.headless)
-@@ -657,7 +743,7 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+@@ -642,6 +772,17 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+   const WindowSystemInfo wsi = impl->platform->GetWindowSystemInfo();
+   UICommon::InitControllers(wsi);
+   impl->controllers_initialized = true;
++  // Layout class: the host app's controller_class (auto/positional/nintendo) is
++  // applied once, in the input layer, before any pad is read. The profile file
++  // is never consulted for this, so a stale generated profile cannot decide
++  // button order.
++  if (impl->config.controller_class == "nintendo")
++    ciface::SDL::SetLayoutClassOverride(1);
++  else if (impl->config.controller_class == "positional")
++    ciface::SDL::SetLayoutClassOverride(0);
++  else
++    ciface::SDL::SetLayoutClassOverride(-1);
++  EnsurePadBound();
+   EnsureAutomationDirectories(impl->config.automation.directory);
+   if (!impl->config.automation.directory.empty()) {
+     for (int port = 0; port < 4; ++port)
+@@ -657,7 +798,7 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
    }
    impl->platform->SetTitle(impl->title);
  
@@ -194,7 +282,7 @@ index f9b5405..beb6a31 100644
    if (!impl->config.graphics.backend.empty())
      Config::SetBase(Config::MAIN_GFX_BACKEND, impl->config.graphics.backend);
    else if (impl->config.headless)
-@@ -665,6 +751,29 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+@@ -665,6 +806,29 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
    if (impl->config.graphics.internal_resolution_scale)
      Config::SetBase(Config::GFX_EFB_SCALE,
                      *impl->config.graphics.internal_resolution_scale);
@@ -224,7 +312,7 @@ index f9b5405..beb6a31 100644
    Config::SetBase(Config::GFX_SHADER_CACHE, true);
    Config::SetBase(Config::GFX_SHADER_COMPILATION_MODE,
                    ShaderCompilationMode::AsynchronousUberShaders);
-@@ -688,9 +797,29 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
+@@ -688,9 +852,29 @@ RuntimeCreateResult Runtime::Create(RuntimeConfig config) {
    Config::SetBase(Config::MAIN_AUDIO_BACKEND, impl->config.audio.backend);
    if (impl->config.audio.mute)
      Config::SetBase(Config::MAIN_AUDIO_VOLUME, 0);
@@ -254,8 +342,35 @@ index f9b5405..beb6a31 100644
    auto &jit = Core::System::GetInstance().GetJitInterface();
    StaticRecompModuleSource recomp_source;
    if (impl->config.module.kind == ModuleSource::Kind::DynamicPath)
+@@ -804,6 +988,16 @@ RuntimeRunResult Runtime::Run() {
+         });
+   }
+   std::jthread title_thread;
++  // Hot-plug: a pad that appears after launch is bound by the same helper the
++  // startup path uses. No profile write, no restart.
++  std::jthread pad_watch_thread([](std::stop_token stop_token) {
++    while (!stop_token.stop_requested())
++    {
++      for (int i = 0; i < 20 && !stop_token.stop_requested(); ++i)
++        std::this_thread::sleep_for(std::chrono::milliseconds(100));
++      EnsurePadBound();
++    }
++  });
+   if (!m_impl->config.headless && m_impl->config.show_fps_in_title) {
+     title_thread = std::jthread([](std::stop_token stop_token) {
+       while (!stop_token.stop_requested()) {
+@@ -814,6 +1008,9 @@ RuntimeRunResult Runtime::Run() {
+     });
+   }
+   m_impl->platform->MainLoop();
++  pad_watch_thread.request_stop();
++  if (pad_watch_thread.joinable())
++    pad_watch_thread.join();
+   title_thread.request_stop();
+   if (title_thread.joinable())
+     title_thread.join();
 diff --git a/tests/frontend_config_test.cpp b/tests/frontend_config_test.cpp
-index 6bb9e0e..524d75b 100644
+index 6bb9e0e..4b9b635 100644
 --- a/tests/frontend_config_test.cpp
 +++ b/tests/frontend_config_test.cpp
 @@ -5,6 +5,8 @@
@@ -267,161 +382,123 @@ index 6bb9e0e..524d75b 100644
  
  #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
  constexpr const char *CONTROLLER_CONFIG_NAME = "GCPadNew.ini";
-@@ -138,6 +140,152 @@ int main() {
+@@ -69,13 +71,14 @@ int main() {
+   invalid_netplay.graphics_backend = "Direct3D 9";
+   if (moderngekko::frontend::SaveConfig(directory, invalid_netplay, &error))
+     return 13;
+-  if (!moderngekko::frontend::GenerateControllerConfig(
+-          directory, netplay_config.controllers, &error))
++  if (!moderngekko::frontend::EnsureCanonicalPadProfile(
++          directory, netplay_config.controllers.front(), &error))
+     return 3;
+   if (moderngekko::frontend::ReadConfiguredController(directory) != controller)
+     return 4;
++  // The canonical profile binds port 1 only, so exactly one device reads back.
+   if (moderngekko::frontend::ReadConfiguredControllers(directory) !=
+-      netplay_config.controllers)
++      std::vector<std::string>{netplay_config.controllers.front()})
+     return 10;
+ 
+   // Scoped so the handle is closed before the cleanup below. Windows refuses
+@@ -94,7 +97,8 @@ int main() {
+       !generated.contains("C-Stick/Up = `Right Y+`\n") ||
+       !generated.contains("Triggers/L-Analog = `Trigger L`\n") ||
+       !generated.contains("Rumble/Motor = `Motor L` | `Motor R`\n") ||
+-      !generated.contains("[GCPad2]\nDevice = SDL/1/Second Controller\n") ||
++      generated.contains("Buttons/A = `Button B`") ||
++      generated.contains("[GCPad2]") ||
+       generated.contains("[Wiimote") || generated.contains("[BalanceBoard]")) {
+     return 5;
+   }
+@@ -125,8 +129,8 @@ int main() {
+                          std::ios::trunc);
+     output << custom;
+   }
+-  if (!moderngekko::frontend::EnsureControllerConfig(
+-          directory, netplay_config.controllers, &error))
++  if (!moderngekko::frontend::EnsureCanonicalPadProfile(
++          directory, netplay_config.controllers.front(), &error))
+     return 11;
+   std::string preserved;
+   {
+@@ -138,6 +142,75 @@ int main() {
                                   directory) != "SDL/9/Custom Controller")
      return 12;
  
-+  // --- Controller layout matrix (v0.1.6) ---------------------------------
-+  // The layout rules are vendor-scoped:
-+  //   0x045E Microsoft / 0x054C Sony / 0x28DE Valve -> always Standard
-+  //   Nintendo first-party name                      -> Nintendo
-+  //   0x2DC8 8BitDo                                  -> a>b Nintendo else Standard
-+  //   everything else                                -> the old name rule
-+  using moderngekko::frontend::ControllerLayout;
-+  using moderngekko::frontend::ControllerMapping;
-+  using moderngekko::frontend::DetectControllerMapping;
-+  using moderngekko::frontend::GenerateControllerConfig;
-+  using moderngekko::frontend::ControllerProfileIsDefault;
-+  using moderngekko::frontend::ControllerProfileDpadSwapped;
++  // --- Canonical controller system (v0.1.9) -----------------------------
++  // ONE positional profile, written once; class is decided in the input layer
++  // from the SDL gamepad type (see LayoutClass.h and tools/controller_matrix.cpp
++  // for the full matrix). No per-device tables, no migration.
++  using moderngekko::frontend::ControllerClass;
++  using moderngekko::frontend::ControllerClassName;
++  using moderngekko::frontend::EnsureCanonicalPadProfile;
++  using moderngekko::frontend::CanonicalPadProfile;
++  using moderngekko::frontend::ParseControllerClass;
 +
-+  const std::string pro2_guid = "03000000c82d00000660000000000000";
-+  const std::string pro2_mapping =
-+      "a:b1,b:b0,x:b4,y:b3,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,"
-+      "leftx:a0,lefty:a1,rightx:a3,righty:a4,leftshoulder:b6,rightshoulder:b7,"
-+      "start:b11,back:b10,";
++  ControllerClass parsed_class = ControllerClass::Auto;
++  if (!ParseControllerClass("positional", &parsed_class) ||
++      parsed_class != ControllerClass::Positional)
++    return 20;
++  if (!ParseControllerClass("nintendo", &parsed_class) ||
++      parsed_class != ControllerClass::Nintendo)
++    return 21;
++  if (ParseControllerClass("gamepad", &parsed_class))
++    return 22;
++  if (std::string(ControllerClassName(ControllerClass::Nintendo)) != "nintendo")
++    return 23;
 +
-+  // 8BitDo Nintendo modes (a:b1,b:b0) swap; hat D-pad left/right is correct.
-+  ControllerMapping m = DetectControllerMapping("SDL/0/8BitDo Pro 2", pro2_mapping,
-+                                                pro2_guid);
-+  if (m.layout != ControllerLayout::Nintendo || m.swap_dpad_lr) return 20;
++  const std::string canonical = CanonicalPadProfile("SDL/0/Test Controller");
++  if (!canonical.contains("Buttons/A = `Button A`") ||
++      !canonical.contains("Buttons/B = `Button B`") ||
++      !canonical.contains("Buttons/X = `Button X`") ||
++      !canonical.contains("Buttons/Y = `Button Y`") ||
++      !canonical.contains("D-Pad/Left = `Pad W`") ||
++      !canonical.contains("D-Pad/Right = `Pad E`") ||
++      !canonical.contains("Device = SDL/0/Test Controller"))
++    return 24;
 +
-+  // Ultimate / Ultimate 2C / 64 / M30 (a:b0,b:b1) stay Standard.
-+  ControllerMapping ult = DetectControllerMapping(
-+      "SDL/0/8BitDo Ultimate", "a:b0,b:b1,x:b3,y:b4,dpleft:h0.8,dpright:h0.2,",
-+      "03000000c82d00001330000000000000");
-+  if (ult.layout != ControllerLayout::Standard || ult.swap_dpad_lr) return 21;
-+  ControllerMapping n64 = DetectControllerMapping(
-+      "SDL/0/8BitDo 64", "a:b0,b:b1,x:b2,y:b3,", "03000000c82d00001930000000000000");
-+  if (n64.layout != ControllerLayout::Standard) return 22;
-+  ControllerMapping m30 = DetectControllerMapping(
-+      "SDL/0/8BitDo M30 Gamepad", "a:b0,b:b1,x:b3,y:b4,",
-+      "03000000c82d00000650000000000000");
-+  if (m30.layout != ControllerLayout::Standard) return 23;
-+
-+  // An 8BitDo in XInput mode enumerates as an Xbox 360 pad: Standard, even
-+  // though the name still says 8BitDo.
-+  ControllerMapping pro2_xinput = DetectControllerMapping(
-+      "SDL/0/8BitDo Pro 2", "a:b0,b:b1,x:b2,y:b3,dpleft:b13,dpright:b14,",
-+      "030000005e0400008e02000000000000");
-+  if (pro2_xinput.layout != ControllerLayout::Standard) return 24;
-+
-+  // Xbox 360 / One / Series / Elite: Standard, no D-pad correction. This is the
-+  // family players reported dead after v0.1.5.
-+  const std::vector<std::pair<std::string, std::string>> xbox_guids = {
-+      {"030000005e0400008e02000010010000", "a:b0,b:b1,dpdown:h0.4,dpleft:h0.8,"
-+                                           "dpright:h0.2,dpup:h0.1,"},
-+      {"030000005e040000ea02000000000000", "a:b0,b:b1,dpdown:b12,dpleft:b13,"
-+                                           "dpright:b14,dpup:b11,"},
-+      {"050000005e040000120b000000783f80", "a:b0,b:b1,dpdown:b12,dpleft:b13,"
-+                                           "dpright:b14,dpup:b11,"},
-+      {"050000005e040000000b000000783f80", "a:b0,b:b1,dpdown:b12,dpleft:b13,"
-+                                           "dpright:b14,dpup:b11,"},
-+      {"050000005e040000050b0000df070001", "a:b0,b:b1,dpdown:h0.4,dpleft:h0.8,"
-+                                           "dpright:h0.2,dpup:h0.1,"},
-+  };
-+  for (const auto &[guid, mapping] : xbox_guids) {
-+    const ControllerMapping pad = DetectControllerMapping(
-+        "SDL/0/Xbox Wireless Controller", mapping, guid);
-+    if (pad.layout != ControllerLayout::Standard || pad.swap_dpad_lr) return 25;
++  const fs::path canonical_dir = directory / "controller";
++  std::string controller_message;
++  if (!EnsureCanonicalPadProfile(canonical_dir, "SDL/0/Test Controller",
++                                 &controller_message))
++    return 25;
++  {
++    std::ifstream in(canonical_dir / "Config" / CONTROLLER_CONFIG_NAME);
++    const std::string written((std::istreambuf_iterator<char>(in)),
++                              std::istreambuf_iterator<char>());
++    if (written != canonical)
++      return 26;
++    if (moderngekko::frontend::ReadConfiguredController(canonical_dir) !=
++        "SDL/0/Test Controller")
++      return 27;
++    // A second call with another pad must keep the file byte-identical.
++    if (!EnsureCanonicalPadProfile(canonical_dir, "SDL/0/Other Pad",
++                                   &controller_message))
++      return 28;
++    std::ifstream again(canonical_dir / "Config" / CONTROLLER_CONFIG_NAME);
++    const std::string kept((std::istreambuf_iterator<char>(again)),
++                           std::istreambuf_iterator<char>());
++    if (kept != canonical)
++      return 29;
 +  }
-+
-+  // PlayStation (PS3 included) and generic pads keep v0.1.4's standard layout.
-+  // v0.1.5 classified these from the raw a>b index and swapped their buttons.
-+  const std::vector<std::pair<std::string, std::string>> standard_guids = {
-+      {"030000004c0500006802000000000000", "a:b14,b:b13,dpdown:b6,dpleft:b7,"
-+                                           "dpright:b5,dpup:b4,"},
-+      {"03000000250900000500000000000000", "a:b2,b:b1,dpleft:h0.4,dpright:h0.2,"},
-+      {"030000004c050000e60c000000000000", "a:b1,b:b2,dpleft:h0.8,dpright:h0.2,"},
-+      {"030000004c050000f20d000000000000", "a:b1,b:b2,dpleft:h0.8,dpright:h0.2,"},
-+  };
-+  for (const auto &[guid, mapping] : standard_guids) {
-+    const ControllerMapping pad =
-+        DetectControllerMapping("SDL/0/PS Controller", mapping, guid);
-+    if (pad.layout != ControllerLayout::Standard || pad.swap_dpad_lr) return 26;
++  // Keyboard device still gets a keyboard profile.
++  const fs::path keyboard_dir = directory / "keyboard";
++  if (!EnsureCanonicalPadProfile(keyboard_dir, "DInput/0/Keyboard Mouse",
++                                 &controller_message))
++    return 30;
++  {
++    std::ifstream in(keyboard_dir / "Config" / CONTROLLER_CONFIG_NAME);
++    const std::string written((std::istreambuf_iterator<char>(in)),
++                              std::istreambuf_iterator<char>());
++    if (!written.contains("Buttons/A = `RETURN`"))
++      return 31;
 +  }
-+
-+  // Nintendo first party stays Nintendo by name.
-+  ControllerMapping sw = DetectControllerMapping(
-+      "SDL/0/Nintendo Switch Pro Controller", "a:b0,b:b1,dpleft:h0.8,dpright:h0.2,",
-+      "030000007e0500000920000000000000");
-+  if (sw.layout != ControllerLayout::Nintendo) return 27;
-+
-+  // Hat D-pad reported left/right reversed -> corrected. A button-bound D-pad
-+  // must NOT be swapped (that mirrored PS3 D-pads in v0.1.5).
-+  ControllerMapping rev = DetectControllerMapping(
-+      "SDL/0/8BitDo Pro 2", "a:b1,b:b0,dpleft:h0.2,dpright:h0.8,", pro2_guid);
-+  if (!rev.swap_dpad_lr) return 28;
-+  ControllerMapping revb = DetectControllerMapping(
-+      "SDL/0/8BitDo Pro 2", "a:b1,b:b0,dpleft:b5,dpright:b4,", pro2_guid);
-+  if (revb.swap_dpad_lr) return 29;
-+
-+  // A pad with no SDL mapping never swaps: fall back to the name rule.
-+  ControllerMapping bare = DetectControllerMapping("SDL/0/Xbox One Controller", "", "");
-+  if (bare.layout != ControllerLayout::Standard) return 30;
-+
-+  const fs::path laydir = directory / "layout";
-+  const auto read_profile = [&]() {
-+    std::ifstream in(laydir / "Config" / CONTROLLER_CONFIG_NAME);
-+    return std::string(std::istreambuf_iterator<char>(in),
-+                       std::istreambuf_iterator<char>());
-+  };
-+  // Nintendo generation swaps A/B and X/Y.
-+  if (!GenerateControllerConfig(laydir, std::string("SDL/0/8BitDo Pro 2"), m, &error))
-+    return 31;
-+  std::string nprof = read_profile();
-+  if (!nprof.contains("Buttons/A = `Button B`") ||
-+      !nprof.contains("Buttons/B = `Button A`") ||
-+      !nprof.contains("Buttons/X = `Button Y`") ||
-+      !nprof.contains("Buttons/Y = `Button X`"))
-+    return 32;
-+  if (!ControllerProfileIsDefault(nprof, ControllerLayout::Nintendo)) return 33;
-+  if (ControllerProfileIsDefault(nprof, ControllerLayout::Standard)) return 34;
-+
-+  // Reversed hat D-pad generation swaps left/right.
-+  if (!GenerateControllerConfig(laydir, std::string("SDL/0/8BitDo Pro 2"), rev, &error))
-+    return 35;
-+  std::string rprof = read_profile();
-+  if (!rprof.contains("D-Pad/Left = `Pad E`") ||
-+      !rprof.contains("D-Pad/Right = `Pad W`"))
-+    return 36;
-+  if (!ControllerProfileDpadSwapped(rprof)) return 37;
-+
-+  // Standard generation unchanged (no regression).
-+  const ControllerMapping xbox = DetectControllerMapping(
-+      "SDL/0/Xbox Wireless Controller",
-+      "a:b0,b:b1,x:b2,y:b3,dpleft:h0.8,dpright:h0.2,",
-+      "030000005e040000ea02000000000000");
-+  if (!GenerateControllerConfig(laydir, std::string("SDL/0/Xbox Wireless Controller"),
-+                                xbox, &error))
-+    return 38;
-+  std::string sprof = read_profile();
-+  if (!sprof.contains("Buttons/A = `Button A`") ||
-+      !sprof.contains("D-Pad/Left = `Pad W`"))
-+    return 39;
-+  if (!ControllerProfileIsDefault(sprof, ControllerLayout::Standard)) return 40;
-+  if (sprof.contains("Buttons/A = `Button B`")) return 41;
-+
-+  // A hand-edited (custom) profile is not "default" -> migration preserves it.
-+  if (ControllerProfileIsDefault(
-+          "[GCPad1]\nDevice = SDL/9/Custom\nButtons/A = Custom\n",
-+          ControllerLayout::Standard))
-+    return 42;
 +
    fs::remove_all(directory);
    return 0;
  }
 diff --git a/tools/frontend_config.cpp b/tools/frontend_config.cpp
-index 03740d4..497fdbc 100644
+index 03740d4..368d97c 100644
 --- a/tools/frontend_config.cpp
 +++ b/tools/frontend_config.cpp
 @@ -3,7 +3,12 @@
@@ -437,117 +514,19 @@ index 03740d4..497fdbc 100644
  #include <string_view>
  
  namespace fs = std::filesystem;
-@@ -71,8 +76,273 @@ std::string_view ControllerSectionPrefix() {
+@@ -71,8 +76,139 @@ std::string_view ControllerSectionPrefix() {
  #endif
  }
  
-+int HexNibble(char c) {
-+  if (c >= '0' && c <= '9')
-+    return c - '0';
-+  if (c >= 'a' && c <= 'f')
-+    return c - 'a' + 10;
-+  if (c >= 'A' && c <= 'F')
-+    return c - 'A' + 10;
-+  return -1;
-+}
-+
-+std::optional<std::uint16_t> GuidWord(std::string_view guid,
-+                                      std::size_t offset) {
-+  if (guid.size() < offset + 4)
-+    return std::nullopt;
-+  const int low = HexNibble(guid[offset]);
-+  const int low2 = HexNibble(guid[offset + 1]);
-+  const int high = HexNibble(guid[offset + 2]);
-+  const int high2 = HexNibble(guid[offset + 3]);
-+  if (low < 0 || low2 < 0 || high < 0 || high2 < 0)
-+    return std::nullopt;
-+  return static_cast<std::uint16_t>((low << 4) | low2 |
-+                                    (((high << 4) | high2) << 8));
-+}
-+
-+enum class ControllerGuidFamily { Unknown, DualSenseEdge, XboxElite };
-+
-+ControllerGuidFamily ClassifyControllerGuid(std::string_view guid) {
-+  const std::optional<std::uint16_t> vendor = GuidWord(guid, 8);
-+  const std::optional<std::uint16_t> product = GuidWord(guid, 16);
-+  if (!vendor || !product)
-+    return ControllerGuidFamily::Unknown;
-+  if (*vendor == 0x054c && *product == 0x0df2)
-+    return ControllerGuidFamily::DualSenseEdge;
-+  if (*vendor == 0x045e &&
-+      (*product == 0x02e3 || *product == 0x0b00 || *product == 0x0b05 ||
-+       *product == 0x0b12 || *product == 0x0b13 || *product == 0x0b20 ||
-+       *product == 0x0b22))
-+    return ControllerGuidFamily::XboxElite;
-+  return ControllerGuidFamily::Unknown;
-+}
-+
-+// Vendors whose pads are printed positionally: the bottom button is "confirm",
-+// the right one is "back", exactly like the GameCube A/B. Their SDL rows bind
-+// "a" to the bottom button on every firmware we ship rows for, so the GameCube
-+// profile must never swap their face buttons. Guarding by vendor (instead of a
-+// per-product GUID list) means a new Xbox/PlayStation model, revision or
-+// Bluetooth GUID cannot regress: 0x045E covers every Xbox 360/One/Series/Elite
-+// report, 0x054C covers PS3/PS4/DualSense/DualSense Edge and 0x28DE the Steam
-+// Deck / Steam virtual pad.
-+bool IsPositionalVendor(std::uint16_t vendor) {
-+  return vendor == 0x045e || vendor == 0x054c || vendor == 0x28de;
-+}
-+
-+// 8BitDo (0x2DC8) ships two different raw button orders: the Nintendo-mode
-+// reports (Pro 2, SN30, SF30, N30, FC30, Zero, Micro) put the right-hand
-+// "A" button on a higher raw index than "B", while the positional families
-+// (Ultimate, Ultimate 2C, 64, M30) keep bottom=0/right=1. Only this vendor is
-+// classified from the a/b index; every other pad keeps the name-based rule so
-+// PS3/PS2/generic pads (which also use a>b in the SDL DB) stay unswapped.
-+bool IsEightBitDoVendor(std::uint16_t vendor) { return vendor == 0x2dc8; }
-+
-+bool IsNintendoName(const std::string &lower) {
-+  return lower.find("switch") != std::string::npos ||
-+         lower.find("joy-con") != std::string::npos ||
-+         lower.find("joycon") != std::string::npos ||
-+         lower.find("nintendo") != std::string::npos ||
-+         lower.find("pro controller") != std::string::npos ||
-+         lower.find("wii u") != std::string::npos;
-+}
-+
-+std::string_view MappingValue(std::string_view mapping, std::string_view key) {
-+  std::string needle(key);
-+  needle += ':';
-+  std::size_t position = 0;
-+  while ((position = mapping.find(needle, position)) != std::string_view::npos) {
-+    if (position == 0 || mapping[position - 1] == ',') {
-+      const std::size_t begin = position + needle.size();
-+      const std::size_t end = mapping.find(',', begin);
-+      return mapping.substr(begin, end == std::string_view::npos
-+                                      ? std::string_view::npos
-+                                      : end - begin);
-+    }
-+    position += needle.size();
-+  }
-+  return {};
-+}
-+
-+std::optional<int> ButtonIndex(std::string_view value) {
-+  if (value.size() < 2 || value.front() != 'b')
-+    return std::nullopt;
-+  int index = 0;
-+  const auto parsed =
-+      std::from_chars(value.data() + 1, value.data() + value.size(), index);
-+  if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size())
-+    return std::nullopt;
-+  return index;
-+}
-+
-+void WriteGameCubeMapping(std::ostream &output, ControllerMapping mapping) {
-+  const bool nintendo = mapping.layout == ControllerLayout::Nintendo;
-+  const char *dpad_left = mapping.swap_dpad_lr ? "`Pad E`" : "`Pad W`";
-+  const char *dpad_right = mapping.swap_dpad_lr ? "`Pad W`" : "`Pad E`";
-+  output << "Buttons/A = " << (nintendo ? "`Button B`" : "`Button A`") << '\n'
-+         << "Buttons/B = " << (nintendo ? "`Button A`" : "`Button B`") << '\n'
-+         << "Buttons/X = " << (nintendo ? "`Button Y`" : "`Button X`") << '\n'
-+         << "Buttons/Y = " << (nintendo ? "`Button X`" : "`Button Y`") << '\n'
-+         << "Buttons/Z = `Shoulder R`\n"
++void WritePositionalGameCubeMapping(std::ostream &output) {
++  // The ONE canonical binding set: SDL positions only. Button order for a
++  // Nintendo-labelled pad is decided in the input layer (LayoutClass), never by
++  // a different profile, so this text is byte-identical on every install.
++  output << "Buttons/A = `Button A`\n"
++            "Buttons/B = `Button B`\n"
++            "Buttons/X = `Button X`\n"
++            "Buttons/Y = `Button Y`\n"
++            "Buttons/Z = `Shoulder R`\n"
 +            "Buttons/Start = Start\n"
 +            "Main Stick/Up = `Left Y+`\n"
 +            "Main Stick/Down = `Left Y-`\n"
@@ -564,10 +543,10 @@ index 03740d4..497fdbc 100644
 +            "Triggers/L-Analog = `Trigger L`\n"
 +            "Triggers/R-Analog = `Trigger R`\n"
 +            "D-Pad/Up = `Pad N`\n"
-+            "D-Pad/Down = `Pad S`\n";
-+  output << "D-Pad/Left = " << dpad_left << '\n'
-+         << "D-Pad/Right = " << dpad_right << '\n'
-+         << "Rumble/Motor = `Motor L` | `Motor R`\n";
++            "D-Pad/Down = `Pad S`\n"
++            "D-Pad/Left = `Pad W`\n"
++            "D-Pad/Right = `Pad E`\n"
++            "Rumble/Motor = `Motor L` | `Motor R`\n";
 +}
 +
 +void WriteKeyboardMapping(std::ostream &output) {
@@ -599,119 +578,83 @@ index 03740d4..497fdbc 100644
 +
  } // namespace
  
-+const char *ControllerLayoutName(ControllerLayout layout) {
-+  switch (layout) {
-+  case ControllerLayout::Auto:
++const char *ControllerClassName(ControllerClass controller_class) {
++  switch (controller_class) {
++  case ControllerClass::Auto:
 +    return "auto";
-+  case ControllerLayout::Standard:
-+    return "standard";
-+  case ControllerLayout::Nintendo:
++  case ControllerClass::Positional:
++    return "positional";
++  case ControllerClass::Nintendo:
 +    return "nintendo";
-+  case ControllerLayout::Keyboard:
-+    return "keyboard";
 +  }
 +  return "auto";
 +}
 +
-+ControllerLayout DetectControllerLayout(std::string_view device) {
-+  const std::string lower = Lower(std::string(device));
-+  if (lower.find("keyboard") != std::string::npos)
-+    return ControllerLayout::Keyboard;
-+  // Nintendo's face buttons are labelled in the opposite order from the
-+  // GameCube pad, so SDL's Button A/B and X/Y need swapping. This covers the
-+  // Switch Pro Controller, Joy-Con, Switch Online pads and Wii U Pro pads.
-+  if (lower.find("switch") != std::string::npos ||
-+      lower.find("joy-con") != std::string::npos ||
-+      lower.find("joycon") != std::string::npos ||
-+      lower.find("nintendo") != std::string::npos ||
-+      lower.find("pro controller") != std::string::npos ||
-+      lower.find("wii u") != std::string::npos)
-+    return ControllerLayout::Nintendo;
-+  // Xbox, PlayStation, Steam Deck, 8BitDo in XInput mode, the GameCube
-+  // adapter and generic SDL pads all use the standard positional layout.
-+  return ControllerLayout::Standard;
-+}
-+
-+ControllerMapping DetectControllerMapping(std::string_view device,
-+                                          std::string_view sdl_mapping,
-+                                          std::string_view sdl_guid) {
-+  ControllerMapping result;
-+  const std::string lower = Lower(std::string(device));
-+  if (lower.find("keyboard") != std::string::npos) {
-+    result.layout = ControllerLayout::Keyboard;
-+    return result;
++bool ParseControllerClass(std::string_view text, ControllerClass *out) {
++  if (!out)
++    return false;
++  const std::string lower = Lower(Trim(std::string(text)));
++  if (lower == "auto") {
++    *out = ControllerClass::Auto;
++    return true;
 +  }
-+
-+  const std::optional<std::uint16_t> vendor = GuidWord(sdl_guid, 8);
-+  const ControllerGuidFamily family = ClassifyControllerGuid(sdl_guid);
-+  if (family == ControllerGuidFamily::DualSenseEdge ||
-+      family == ControllerGuidFamily::XboxElite ||
-+      (vendor && IsPositionalVendor(*vendor))) {
-+    // Xbox (all 360/One/Series/Elite reports), PlayStation, Steam and the
-+    // Edge/Elite paddles are standard-position pads. Their extra buttons
-+    // (paddle1-4, misc1) are intentionally not bound; face buttons, sticks,
-+    // D-pad and triggers behave exactly like the base pads.
-+    result.layout = ControllerLayout::Standard;
-+  } else if (IsNintendoName(lower)) {
-+    // Keep the established name rule for Nintendo first-party pads. Their SDL
-+    // DB entries are not consistent about a/b ordering across firmware, but the
-+    // project has always treated the printed labels as the reference.
-+    result.layout = ControllerLayout::Nintendo;
-+  } else if (vendor && IsEightBitDoVendor(*vendor)) {
-+    // Read the live SDL mapping rather than guessing from the product name, so
-+    // 8BitDo's XInput/standard modes and its Nintendo modes are both correct.
-+    const std::optional<int> a = ButtonIndex(MappingValue(sdl_mapping, "a"));
-+    const std::optional<int> b = ButtonIndex(MappingValue(sdl_mapping, "b"));
-+    if (a && b && *a != *b)
-+      result.layout = *a > *b ? ControllerLayout::Nintendo
-+                              : ControllerLayout::Standard;
-+    else
-+      result.layout = ControllerLayout::Standard;
-+  } else {
-+    // Every other pad keeps the v0.1.4 behaviour: the name rule, else standard.
-+    // PS3/PS2, generic SNES clones and arcade sticks also report a>b in the SDL
-+    // DB, but they are positionally labelled - classifying them from the raw
-+    // button index swapped their face buttons (the v0.1.5 collateral damage).
-+    result.layout = DetectControllerLayout(device);
++  // "standard"/"xbox"/"playstation"/"keyboard" are accepted so an existing
++  // controller_layout value keeps working; keyboard has no class of its own
++  // (the canonical profile is positional; a keyboard profile is a device path).
++  if (lower == "positional" || lower == "standard" || lower == "default" ||
++      lower == "xbox" || lower == "playstation" || lower == "keyboard") {
++    *out = ControllerClass::Positional;
++    return true;
 +  }
-+
-+  // Dolphin binds the GameCube D-pad to hat directions (`Pad W`/`Pad E`), so the
-+  // only correction that can matter is a hat report whose left/right indices are
-+  // swapped. Button- or axis-bound D-pads cannot produce a `Pad` direction at
-+  // all; deriving a swap from their indices turned a PlayStation-style D-pad
-+  // (dpleft:b7,dpright:b5) into a mirrored one.
-+  const std::string_view left = MappingValue(sdl_mapping, "dpleft");
-+  const std::string_view right = MappingValue(sdl_mapping, "dpright");
-+  if (left.starts_with("h") && right.starts_with("h"))
-+    result.swap_dpad_lr = left == "h0.2" && right == "h0.8";
-+  return result;
++  if (lower == "nintendo" || lower == "switch") {
++    *out = ControllerClass::Nintendo;
++    return true;
++  }
++  return false;
 +}
 +
-+bool ControllerProfileDpadSwapped(std::string_view text) {
-+  return text.find("D-Pad/Left = `Pad E`") != std::string_view::npos &&
-+         text.find("D-Pad/Right = `Pad W`") != std::string_view::npos;
++std::string CanonicalPadProfile(std::string_view device) {
++  std::ostringstream output;
++  output << "[GCPad1]\n";
++  output << "Device = " << device << '\n';
++  if (device == "DInput/0/Keyboard Mouse")
++    WriteKeyboardMapping(output);
++  else
++    WritePositionalGameCubeMapping(output);
++  return output.str();
 +}
 +
-+bool ControllerProfileIsDefault(std::string_view text,
-+                                ControllerLayout layout) {
-+  if (layout == ControllerLayout::Keyboard)
-+    return text.find("Buttons/A = `RETURN`") != std::string_view::npos &&
-+           text.find("Buttons/B = `BACKSPACE`") != std::string_view::npos;
-+  const bool nintendo = layout == ControllerLayout::Nintendo;
-+  return text.find(nintendo ? "Buttons/A = `Button B`" : "Buttons/A = `Button A`") !=
-+             std::string_view::npos &&
-+         text.find(nintendo ? "Buttons/B = `Button A`" : "Buttons/B = `Button B`") !=
-+             std::string_view::npos &&
-+         text.find(nintendo ? "Buttons/X = `Button Y`" : "Buttons/X = `Button X`") !=
-+             std::string_view::npos &&
-+         text.find(nintendo ? "Buttons/Y = `Button X`" : "Buttons/Y = `Button Y`") !=
-+             std::string_view::npos;
++bool EnsureCanonicalPadProfile(const std::filesystem::path &user_directory,
++                               std::string_view device, std::string *message) {
++  const fs::path destination = ControllerConfigPath(user_directory);
++  std::error_code ec;
++  if (fs::is_regular_file(destination, ec)) {
++    if (message)
++      *message = "existing " + destination.filename().string() + " kept";
++    return true;
++  }
++  fs::create_directories(destination.parent_path(), ec);
++  std::ofstream output(destination, std::ios::trunc);
++  if (!output) {
++    if (message)
++      *message = "can't write " + destination.string();
++    return false;
++  }
++  output << CanonicalPadProfile(device);
++  if (!output) {
++    if (message)
++      *message = "can't write " + destination.string();
++    return false;
++  }
++  if (message)
++    *message = "1 GameCube controller mapped (canonical positional profile)";
++  return true;
 +}
 +
  const std::vector<ResolutionOption> &SupportedResolutions() {
    // These are the output-resolution labels used by Dolphin's integer EFB
    // scales.
-@@ -103,8 +373,14 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -103,8 +239,14 @@ ConfigResult LoadConfig(const fs::path &user_directory,
    std::ifstream file(path);
    if (!file)
      return {.error = "can't open " + path.string()};
@@ -726,28 +669,20 @@ index 03740d4..497fdbc 100644
    std::string line;
    while (std::getline(file, line)) {
      if (!line.empty() && line.back() == '\r')
-@@ -128,6 +404,20 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -128,6 +270,12 @@ ConfigResult LoadConfig(const fs::path &user_directory,
      }
      else if (key == "controller")
        config.controller = raw_value;
-+    else if (key == "controller_layout") {
-+      const std::string layout = Lower(raw_value);
-+      if (layout == "auto" || layout == "standard" || layout == "xbox" ||
-+          layout == "playstation")
-+        config.controller_layout = layout == "auto" ? "auto" : "standard";
-+      else if (layout == "nintendo" || layout == "switch")
-+        config.controller_layout = "nintendo";
-+      else if (layout == "keyboard")
-+        config.controller_layout = "keyboard";
-+      else
-+        return {.error =
-+                    "controller_layout must be auto, standard, nintendo or "
-+                    "keyboard"};
++    else if (key == "controller_class" || key == "controller_layout") {
++      ControllerClass parsed = ControllerClass::Auto;
++      if (!ParseControllerClass(raw_value, &parsed))
++        return {.error = "controller_class must be auto, positional or nintendo"};
++      config.controller_class = ControllerClassName(parsed);
 +    }
      else if (key.starts_with("controller") && key.size() == 11 &&
               key.back() >= '1' && key.back() <= '4') {
        const std::size_t index = static_cast<std::size_t>(key.back() - '1');
-@@ -140,6 +430,73 @@ ConfigResult LoadConfig(const fs::path &user_directory,
+@@ -140,6 +288,73 @@ ConfigResult LoadConfig(const fs::path &user_directory,
      } else if (key == "fullscreen") {
        if (!ParseBoolean(value, &config.fullscreen))
          return {.error = "fullscreen must be true or false"};
@@ -821,7 +756,7 @@ index 03740d4..497fdbc 100644
      } else if (key == "nickname")
        config.netplay_nickname = raw_value;
      else if (key == "address")
-@@ -216,7 +573,13 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -216,7 +431,13 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
        config.netplay_nickname.find_first_of("\r\n") != std::string::npos ||
        !ValidNetplayAddress(config.netplay_address) ||
        config.netplay_address.find_first_of("\r\n") != std::string::npos ||
@@ -836,7 +771,7 @@ index 03740d4..497fdbc 100644
      if (error)
        *error = "invalid frontend settings";
      return false;
-@@ -257,6 +620,23 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -257,6 +478,23 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
         << "fullscreen=" << (config.fullscreen ? "true" : "false") << '\n'
         << "show_fps_in_title=" << (config.show_fps_in_title ? "true" : "false")
         << '\n'
@@ -860,29 +795,56 @@ index 03740d4..497fdbc 100644
         << "[Input]\n";
    for (std::size_t i = 0; i < config.controllers.size() && i < 4; ++i) {
      if (config.controllers[i].find_first_of("\r\n") != std::string::npos) {
-@@ -266,7 +646,8 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
+@@ -266,7 +504,8 @@ bool SaveConfig(const fs::path &user_directory, const ConfigResult &config,
      }
      file << "controller" << i + 1 << '=' << config.controllers[i] << '\n';
    }
 -  file << "[Netplay]\n"
-+  file << "controller_layout=" << config.controller_layout << '\n'
++  file << "controller_class=" << config.controller_class << '\n'
 +       << "[Netplay]\n"
         << "nickname=" << config.netplay_nickname << '\n'
         << "address=" << config.netplay_address << '\n'
         << "port=" << config.netplay_port << '\n'
-@@ -338,7 +719,7 @@ bool ControllerConfigExists(const fs::path &user_directory) {
+@@ -336,162 +575,4 @@ bool ControllerConfigExists(const fs::path &user_directory) {
+   return fs::is_regular_file(ControllerConfigPath(user_directory), ec);
+ }
  
- bool GenerateControllerConfig(const fs::path &user_directory,
-                               std::span<const std::string> controllers,
+-bool GenerateControllerConfig(const fs::path &user_directory,
+-                              std::span<const std::string> controllers,
 -                              std::string *message) {
-+                              ControllerMapping mapping, std::string *message) {
-   if (controllers.empty() || controllers.size() > 4) {
-     if (message)
-       *message = "select between one and four connected SDL gamepads";
-@@ -372,33 +753,19 @@ bool GenerateControllerConfig(const fs::path &user_directory,
-     output << "[GCPad" << i + 1 << "]\n";
-     if (i >= controllers.size())
-       continue;
+-  if (controllers.empty() || controllers.size() > 4) {
+-    if (message)
+-      *message = "select between one and four connected SDL gamepads";
+-    return false;
+-  }
+-  for (const std::string &controller : controllers) {
+-    if (controller.empty() ||
+-        controller.find_first_of("\r\n") != std::string_view::npos) {
+-      if (message)
+-        *message = "select connected SDL gamepads";
+-      return false;
+-    }
+-  }
+-
+-  const fs::path destination = ControllerConfigPath(user_directory);
+-  std::error_code ec;
+-  fs::create_directories(destination.parent_path(), ec);
+-  if (ec) {
+-    if (message)
+-      *message = "can't create controller config directory: " + ec.message();
+-    return false;
+-  }
+-  std::ofstream output(destination, std::ios::trunc);
+-  if (!output) {
+-    if (message)
+-      *message = "can't write " + destination.string();
+-    return false;
+-  }
+-  for (std::size_t i = 0; i < 4; ++i) {
+-#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+-    output << "[GCPad" << i + 1 << "]\n";
+-    if (i >= controllers.size())
+-      continue;
 -    output << "Device = " << controllers[i] << '\n'
 -           << "Buttons/A = `Button A`\n"
 -              "Buttons/B = `Button B`\n"
@@ -909,126 +871,133 @@ index 03740d4..497fdbc 100644
 -              "D-Pad/Left = `Pad W`\n"
 -              "D-Pad/Right = `Pad E`\n"
 -              "Rumble/Motor = `Motor L` | `Motor R`\n";
-+    output << "Device = " << controllers[i] << '\n';
-+    const ControllerLayout detected = DetectControllerLayout(controllers[i]);
-+    ControllerMapping resolved = mapping;
-+    if (detected == ControllerLayout::Keyboard)
-+      resolved.layout = ControllerLayout::Keyboard;
-+    else if (resolved.layout == ControllerLayout::Auto)
-+      resolved.layout = detected;
-+    if (resolved.layout == ControllerLayout::Keyboard)
-+      WriteKeyboardMapping(output);
-+    else
-+      WriteGameCubeMapping(output, resolved);
- #else
-+    (void)mapping;
-     output << "[Wiimote" << i + 1 << "]\n";
-     if (i >= controllers.size())
-       continue;
-@@ -458,7 +825,7 @@ bool GenerateControllerConfig(const fs::path &user_directory,
-       *message = "can't write " + destination.string();
-     return false;
-   }
+-#else
+-    output << "[Wiimote" << i + 1 << "]\n";
+-    if (i >= controllers.size())
+-      continue;
+-    output << "Device = " << controllers[i] << '\n'
+-           << "Buttons/A = `Shoulder L`\n"
+-              "Buttons/B = `Shoulder R`\n"
+-              "Buttons/1 = `Button W`\n"
+-              "Buttons/2 = `Button S`\n"
+-              "Buttons/- = Back\n"
+-              "Buttons/+ = Start\n"
+-              "Buttons/Home = Guide\n"
+-              "D-Pad/Up = `Pad N` | `Left Y+`\n"
+-              "D-Pad/Down = `Pad S` | `Left Y-`\n"
+-              "D-Pad/Left = `Pad W` | `Left X-`\n"
+-              "D-Pad/Right = `Pad E` | `Left X+`\n"
+-              "IR/Up = `Cursor Y-`\n"
+-              "IR/Down = `Cursor Y+`\n"
+-              "IR/Left = `Cursor X-`\n"
+-              "IR/Right = `Cursor X+`\n"
+-              "Shake/X = `Trigger L`\n"
+-              "Shake/Y = `Trigger R`\n"
+-              "Shake/Z = `Trigger L`\n"
+-              "IRPassthrough/Object 1 X = `IR Object 1 X`\n"
+-              "IRPassthrough/Object 1 Y = `IR Object 1 Y`\n"
+-              "IRPassthrough/Object 1 Size = `IR Object 1 Size`\n"
+-              "IRPassthrough/Object 2 X = `IR Object 2 X`\n"
+-              "IRPassthrough/Object 2 Y = `IR Object 2 Y`\n"
+-              "IRPassthrough/Object 2 Size = `IR Object 2 Size`\n"
+-              "IRPassthrough/Object 3 X = `IR Object 3 X`\n"
+-              "IRPassthrough/Object 3 Y = `IR Object 3 Y`\n"
+-              "IRPassthrough/Object 3 Size = `IR Object 3 Size`\n"
+-              "IRPassthrough/Object 4 X = `IR Object 4 X`\n"
+-              "IRPassthrough/Object 4 Y = `IR Object 4 Y`\n"
+-              "IRPassthrough/Object 4 Size = `IR Object 4 Size`\n"
+-              "IMUAccelerometer/Up = `Accel Up`\n"
+-              "IMUAccelerometer/Down = `Accel Down`\n"
+-              "IMUAccelerometer/Left = `Accel Left`\n"
+-              "IMUAccelerometer/Right = `Accel Right`\n"
+-              "IMUAccelerometer/Forward = `Accel Forward`\n"
+-              "IMUAccelerometer/Backward = `Accel Backward`\n"
+-              "IMUGyroscope/Pitch Up = `Gyro Pitch Up`\n"
+-              "IMUGyroscope/Pitch Down = `Gyro Pitch Down`\n"
+-              "IMUGyroscope/Roll Left = `Gyro Roll Left`\n"
+-              "IMUGyroscope/Roll Right = `Gyro Roll Right`\n"
+-              "IMUGyroscope/Yaw Left = `Gyro Yaw Left`\n"
+-              "IMUGyroscope/Yaw Right = `Gyro Yaw Right`\n"
+-              "Rumble/Motor = Motor\n"
+-              "Extension = None\n"
+-              "Options/Sideways Wiimote = True\n";
+-#endif
+-  }
+-#ifndef MODERNGEKKO_GAMECUBE_CONTROLLERS
+-  output << "[BalanceBoard]\n";
+-#endif
+-  if (!output) {
+-    if (message)
+-      *message = "can't write " + destination.string();
+-    return false;
+-  }
 -  if (message)
-+  if (message) {
-     *message = std::to_string(controllers.size()) +
- #ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
-                " GameCube controller" +
-@@ -466,15 +833,52 @@ bool GenerateControllerConfig(const fs::path &user_directory,
-                " sideways Wii Remote" +
- #endif
-                (controllers.size() == 1 ? " mapped" : "s mapped");
-+#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
-+    if (mapping.layout != ControllerLayout::Auto)
-+      *message += std::string(" (") + ControllerLayoutName(mapping.layout) + " layout)";
-+    if (mapping.swap_dpad_lr)
-+      *message += " (d-pad left/right corrected)";
-+#endif
-+  }
-   return true;
- }
- 
- bool GenerateControllerConfig(const fs::path &user_directory,
+-    *message = std::to_string(controllers.size()) +
+-#ifdef MODERNGEKKO_GAMECUBE_CONTROLLERS
+-               " GameCube controller" +
+-#else
+-               " sideways Wii Remote" +
+-#endif
+-               (controllers.size() == 1 ? " mapped" : "s mapped");
+-  return true;
+-}
+-
+-bool GenerateControllerConfig(const fs::path &user_directory,
 -                              std::string_view controller,
-+                              std::span<const std::string> controllers,
-                               std::string *message) {
-+  return GenerateControllerConfig(user_directory, controllers,
-+                                  ControllerMapping{ControllerLayout::Auto, false},
-+                                  message);
-+}
-+
-+bool GenerateControllerConfig(const fs::path &user_directory,
-+                              std::span<const std::string> controllers,
-+                              ControllerLayout layout, std::string *message) {
-+  return GenerateControllerConfig(user_directory, controllers,
-+                                  ControllerMapping{layout, false}, message);
-+}
-+
-+bool GenerateControllerConfig(const fs::path &user_directory,
-+                              std::string_view controller,
-+                              ControllerMapping mapping, std::string *message) {
-   const std::string value(controller);
-   return GenerateControllerConfig(
+-                              std::string *message) {
+-  const std::string value(controller);
+-  return GenerateControllerConfig(
 -      user_directory, std::span<const std::string>(&value, 1), message);
-+      user_directory, std::span<const std::string>(&value, 1), mapping, message);
-+}
-+
-+bool GenerateControllerConfig(const fs::path &user_directory,
-+                              std::string_view controller,
-+                              ControllerLayout layout, std::string *message) {
-+  return GenerateControllerConfig(user_directory, controller,
-+                                  ControllerMapping{layout, false}, message);
-+}
-+
-+bool GenerateControllerConfig(const fs::path &user_directory,
-+                              std::string_view controller,
-+                              std::string *message) {
-+  return GenerateControllerConfig(user_directory, controller,
-+                                  ControllerMapping{ControllerLayout::Auto, false},
-+                                  message);
- }
- 
- bool EnsureControllerConfig(const fs::path &user_directory,
+-}
+-
+-bool EnsureControllerConfig(const fs::path &user_directory,
+-                            std::span<const std::string> controllers,
+-                            std::string *message) {
+-  if (ControllerConfigExists(user_directory)) {
+-    if (message)
+-      *message = "using existing controller profile";
+-    return true;
+-  }
+-  return GenerateControllerConfig(user_directory, controllers, message);
+-}
+-
+-bool EnsureControllerConfig(const fs::path &user_directory,
+-                            std::string_view controller, std::string *message) {
+-  const std::string value(controller);
+-  return EnsureControllerConfig(
+-      user_directory, std::span<const std::string>(&value, 1), message);
+-}
+ } // namespace moderngekko::frontend
 diff --git a/tools/frontend_config.hpp b/tools/frontend_config.hpp
-index 3b18d05..d640586 100644
+index 3b18d05..0e961c4 100644
 --- a/tools/frontend_config.hpp
 +++ b/tools/frontend_config.hpp
-@@ -8,6 +8,30 @@
+@@ -8,6 +8,20 @@
  #include <vector>
  
  namespace moderngekko::frontend {
-+enum class ControllerLayout {
++// Canonical controller layout class. The class only swaps A<->B and X<->Y; the
++// D-pad, sticks and triggers are never touched. It is resolved per pad from the
++// SDL gamepad type inside the input layer (see LayoutClass.h); no controller
++// profile is read or written to decide it.
++enum class ControllerClass
++{
 +  Auto,
-+  Standard,
++  Positional,
 +  Nintendo,
-+  Keyboard,
 +};
 +
-+const char *ControllerLayoutName(ControllerLayout layout);
-+ControllerLayout DetectControllerLayout(std::string_view device);
-+
-+// A controller's button family plus any D-pad left/right correction needed by
-+// its SDL mapping. DetectControllerMapping parses the live SDL mapping string,
-+// so 8BitDo Switch-mode and XInput-mode pads are handled per GUID/report, not
-+// by a name guess.
-+struct ControllerMapping {
-+  ControllerLayout layout = ControllerLayout::Standard;
-+  bool swap_dpad_lr = false;
-+};
-+ControllerMapping DetectControllerMapping(std::string_view device,
-+                                          std::string_view sdl_mapping = {},
-+                                          std::string_view sdl_guid = {});
-+bool ControllerProfileIsDefault(std::string_view text, ControllerLayout layout);
-+bool ControllerProfileDpadSwapped(std::string_view text);
++const char *ControllerClassName(ControllerClass controller_class);
++bool ParseControllerClass(std::string_view text, ControllerClass *out);
 +
  struct ResolutionOption {
    const char *text;
    int dolphin_scale;
-@@ -24,8 +48,22 @@ struct ConfigResult {
+@@ -24,8 +38,22 @@ struct ConfigResult {
    std::string graphics_backend = "Vulkan";
    std::string controller;
    std::vector<std::string> controllers;
-+  std::string controller_layout = "auto";
++  std::string controller_class = "auto";
    bool show_fps_in_title = true;
    bool fullscreen = false;
 +  int msaa = 1;
@@ -1047,7 +1016,7 @@ index 3b18d05..d640586 100644
    std::string netplay_nickname = "Player";
    std::string netplay_address = "127.0.0.1";
    std::uint16_t netplay_port = 2626;
-@@ -39,6 +77,7 @@ const std::vector<ResolutionOption> &SupportedResolutions();
+@@ -39,6 +67,7 @@ const std::vector<ResolutionOption> &SupportedResolutions();
  const std::vector<GraphicsBackendOption> &SupportedGraphicsBackends();
  ConfigResult LoadConfig(const std::filesystem::path &user_directory,
                          bool create_if_missing);
@@ -1055,30 +1024,30 @@ index 3b18d05..d640586 100644
  bool SaveConfig(const std::filesystem::path &user_directory,
                  const ConfigResult &config, std::string *error);
  bool SaveConfig(const std::filesystem::path &user_directory,
-@@ -52,9 +91,21 @@ bool ControllerConfigExists(const std::filesystem::path &user_directory);
- bool GenerateControllerConfig(const std::filesystem::path &user_directory,
-                               std::span<const std::string> controllers,
-                               std::string *message);
-+bool GenerateControllerConfig(const std::filesystem::path &user_directory,
-+                              std::span<const std::string> controllers,
-+                              ControllerLayout layout, std::string *message);
-+bool GenerateControllerConfig(const std::filesystem::path &user_directory,
-+                              std::span<const std::string> controllers,
-+                              ControllerMapping mapping, std::string *message);
- bool GenerateControllerConfig(const std::filesystem::path &user_directory,
-                               std::string_view controller,
-                               std::string *message);
-+bool GenerateControllerConfig(const std::filesystem::path &user_directory,
-+                              std::string_view controller,
-+                              ControllerLayout layout, std::string *message);
-+bool GenerateControllerConfig(const std::filesystem::path &user_directory,
-+                              std::string_view controller,
-+                              ControllerMapping mapping, std::string *message);
- bool EnsureControllerConfig(const std::filesystem::path &user_directory,
-                             std::span<const std::string> controllers,
-                             std::string *message);
+@@ -49,15 +78,10 @@ ReadConfiguredController(const std::filesystem::path &user_directory);
+ std::vector<std::string>
+ ReadConfiguredControllers(const std::filesystem::path &user_directory);
+ bool ControllerConfigExists(const std::filesystem::path &user_directory);
+-bool GenerateControllerConfig(const std::filesystem::path &user_directory,
+-                              std::span<const std::string> controllers,
+-                              std::string *message);
+-bool GenerateControllerConfig(const std::filesystem::path &user_directory,
+-                              std::string_view controller,
+-                              std::string *message);
+-bool EnsureControllerConfig(const std::filesystem::path &user_directory,
+-                            std::span<const std::string> controllers,
+-                            std::string *message);
+-bool EnsureControllerConfig(const std::filesystem::path &user_directory,
+-                            std::string_view controller, std::string *message);
++// ONE canonical profile: positional SDL bindings, or the keyboard mapping when
++// the device is the keyboard. Written only when the file is missing; never
++// regenerated or migrated afterwards.
++std::string CanonicalPadProfile(std::string_view device);
++bool EnsureCanonicalPadProfile(const std::filesystem::path &user_directory,
++                               std::string_view device, std::string *message);
+ } // namespace moderngekko::frontend
 diff --git a/tools/moderngekko_launcher.cpp b/tools/moderngekko_launcher.cpp
-index 7699c3d..4b3d6e6 100644
+index 7699c3d..eb2419c 100644
 --- a/tools/moderngekko_launcher.cpp
 +++ b/tools/moderngekko_launcher.cpp
 @@ -13,13 +13,27 @@
@@ -1611,28 +1580,29 @@ index 7699c3d..4b3d6e6 100644
    std::vector<ControllerOption> controllers = EnumerateControllers();
    bool controller_profile_exists = moderngekko::frontend::ControllerConfigExists(user_directory);
    std::vector<std::string> configured_controllers =
-@@ -639,31 +972,37 @@ int main(int argc, char** argv)
+@@ -639,31 +972,38 @@ int main(int argc, char** argv)
    std::string selected_controller =
        configured_controllers.empty() ? config.controller : configured_controllers.front();
    int controller_index = FindController(controllers, selected_controller);
-+  int controller_layout_index =
-+      config.controller_layout == "standard" ? 1
-+      : config.controller_layout == "nintendo" ? 2
-+                                               : 0;
++  int controller_class_index =
++      config.controller_class == "positional" ? 1
++      : config.controller_class == "nintendo" ? 2
++                                              : 0;
    std::string controller_status;
-+  const auto selected_layout = [&]() {
-+    using moderngekko::frontend::ControllerLayout;
-+    return controller_layout_index == 1 ? ControllerLayout::Standard
-+           : controller_layout_index == 2 ? ControllerLayout::Nintendo
-+                                          : ControllerLayout::Auto;
++  const auto selected_class = [&]() {
++    using moderngekko::frontend::ControllerClass;
++    return controller_class_index == 1 ? ControllerClass::Positional
++           : controller_class_index == 2 ? ControllerClass::Nintendo
++                                         : ControllerClass::Auto;
 +  };
    const auto select_controller = [&](int index)
    {
-+    const auto layout = selected_layout();
++    const auto controller_class = selected_class();
      std::string message;
-     if (!moderngekko::frontend::GenerateControllerConfig(user_directory, controllers[index].device,
+-    if (!moderngekko::frontend::GenerateControllerConfig(user_directory, controllers[index].device,
 -                                                         &message))
-+                                                         layout, &message))
++    if (!moderngekko::frontend::EnsureCanonicalPadProfile(
++            user_directory, controllers[index].device, &message))
      {
        std::lock_guard lock(dialog.mutex);
        dialog.error = std::move(message);
@@ -1652,13 +1622,14 @@ index 7699c3d..4b3d6e6 100644
      config.controllers = configured_controllers;
      config.resolution = resolutions[resolution_index].text;
      config.show_fps_in_title = show_fps_in_title;
-+    config.controller_layout = moderngekko::frontend::ControllerLayoutName(layout);
++    config.controller_class =
++        moderngekko::frontend::ControllerClassName(controller_class);
 +    if (!save_config())
 +      return false;
      controller_profile_exists = true;
      controller_status = std::move(message);
      return true;
-@@ -716,6 +1055,26 @@ int main(int argc, char** argv)
+@@ -716,6 +1056,26 @@ int main(int argc, char** argv)
      }
    };
    refresh_controllers();
@@ -1685,7 +1656,7 @@ index 7699c3d..4b3d6e6 100644
    ExtractionState extraction;
    std::jthread extraction_thread;
    enum class LaunchMode
-@@ -727,8 +1086,15 @@ int main(int argc, char** argv)
+@@ -727,8 +1087,15 @@ int main(int argc, char** argv)
    };
    bool done = false;
    LaunchMode launch_mode = LaunchMode::None;
@@ -1701,7 +1672,7 @@ index 7699c3d..4b3d6e6 100644
      bool controllers_changed = false;
      SDL_Event event;
      while (SDL_PollEvent(&event))
-@@ -753,6 +1119,27 @@ int main(int argc, char** argv)
+@@ -753,6 +1120,27 @@ int main(int argc, char** argv)
          dialog.selected.reset();
        }
      }
@@ -1729,7 +1700,7 @@ index 7699c3d..4b3d6e6 100644
      {
        std::lock_guard lock(extraction.mutex);
        if (extraction.finished_game)
-@@ -774,330 +1161,809 @@ int main(int argc, char** argv)
+@@ -774,330 +1162,809 @@ int main(int argc, char** argv)
      ImGui_ImplSDL3_NewFrame();
      ImGui::NewFrame();
      const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -2650,8 +2621,8 @@ index 7699c3d..4b3d6e6 100644
 -      if (selected_image)
 +      ImGui::TextDisabled("Button layout");
 +      ImGui::SetNextItemWidth(-1);
-+      const char* layout_names[] = {"Auto-detect", "Standard (Xbox / PS)", "Nintendo (A/B swap)"};
-+      if (ImGui::BeginCombo("##padlayout", layout_names[controller_layout_index]))
++      const char* class_names[] = {"Auto-detect", "Positional (Xbox / PS)", "Nintendo (A/B swap)"};
++      if (ImGui::BeginCombo("##padclass", class_names[controller_class_index]))
        {
 -        ImGui::SameLine();
 -        if (ImGui::Button("Extract and Play"))
@@ -2660,14 +2631,14 @@ index 7699c3d..4b3d6e6 100644
 -          extraction.completed = 0;
 -          extraction.total = 1;
 -          extraction.running = true;
-+          if (ImGui::Selectable(layout_names[li], controller_layout_index == li))
++          if (ImGui::Selectable(class_names[li], controller_class_index == li))
            {
 -            std::lock_guard lock(extraction.mutex);
 -            extraction.error.clear();
 -            extraction.finished_game.reset();
-+            controller_layout_index = li;
-+            config.controller_layout =
-+                moderngekko::frontend::ControllerLayoutName(selected_layout());
++            controller_class_index = li;
++            config.controller_class =
++                moderngekko::frontend::ControllerClassName(selected_class());
 +            save_config();
 +            if (controller_index >= 0)
 +              select_controller(controller_index);
@@ -2678,7 +2649,7 @@ index 7699c3d..4b3d6e6 100644
 -                                             ExtractDisc(image, user_directory,
 -                                                         release_directory, &extraction);
 -                                           });
-+          if (controller_layout_index == li)
++          if (controller_class_index == li)
 +            ImGui::SetItemDefaultFocus();
          }
 +        ImGui::EndCombo();
@@ -2784,7 +2755,7 @@ index 7699c3d..4b3d6e6 100644
    }
  
    if (extraction_thread.joinable())
-@@ -1115,150 +1981,184 @@ int main(int argc, char** argv)
+@@ -1115,150 +1982,184 @@ int main(int argc, char** argv)
      }
      else
      {
@@ -3093,7 +3064,7 @@ index 7699c3d..4b3d6e6 100644
      }
    }
 diff --git a/tools/moderngekko_run.cpp b/tools/moderngekko_run.cpp
-index d6b3569..9b2791f 100644
+index d6b3569..0c4b4a8 100644
 --- a/tools/moderngekko_run.cpp
 +++ b/tools/moderngekko_run.cpp
 @@ -7,6 +7,10 @@
@@ -3119,7 +3090,7 @@ index d6b3569..9b2791f 100644
  #include <vector>
  
  #if defined(_WIN32)
-@@ -41,13 +47,315 @@ volatile std::sig_atomic_t s_stop_requested = 0;
+@@ -41,13 +47,207 @@ volatile std::sig_atomic_t s_stop_requested = 0;
  
  void HandleStopSignal(int) { s_stop_requested = 1; }
  
@@ -3144,6 +3115,17 @@ index d6b3569..9b2791f 100644
 +// (Microsoft 045E:02E3/0B00/0B05) are already present with the standard Xbox
 +// layout. Edge paddles/Fn (misc1) and Elite paddles (paddle1-4) are extra buttons
 +// the GameCube profile does not bind -> explicitly ignored (no GC equivalent).
++void ApplyRuntimeSdlHints() {
++  // Same hints the runtime's own SDL input backend uses, so the scan below sees
++  // exactly the devices the game will see.
++  SDL_SetHint(SDL_HINT_JOYSTICK_DIRECTINPUT, "1");
++  SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_COMBINE_JOY_CONS, "1");
++  SDL_SetHint(SDL_HINT_JOYSTICK_HIDAPI_VERTICAL_JOY_CONS, "0");
++}
++
++// SDL mapping registration only - not layout. The bundled DB has no row for the
++// DualSense Edge USB ids (054C:0DF2), so without this the pad is not recognised
++// as a gamepad at all. Button order is decided later by the input layer.
 +void RegisterProControllerMappings() {
 +  static const char *kEdgeUsbLayout =
 +      "a:b1,b:b2,back:b8,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,dpup:h0.1,"
@@ -3158,12 +3140,6 @@ index d6b3569..9b2791f 100644
 +       kEdgeUsbLayout).c_str());
 +}
 +
-+std::string GamepadGuid(SDL_JoystickID id) {
-+  char buf[33] = {};
-+  SDL_GUIDToString(SDL_GetGamepadGUIDForID(id), buf, sizeof(buf));
-+  return std::string(buf);
-+}
-+
 +// SDL GUID hex: VID at chars [8..11], PID at [16..19], little-endian byte pairs.
 +void GuidVidPid(const std::string &guid, std::string &vid, std::string &pid) {
 +  const auto swap = [](const std::string &s) { return s.substr(2, 2) + s.substr(0, 2); };
@@ -3171,43 +3147,25 @@ index d6b3569..9b2791f 100644
 +  pid = guid.size() >= 20 ? swap(guid.substr(16, 4)) : "????";
 +}
 +
-+std::string ReadTextFile(const std::filesystem::path &path) {
-+  std::ifstream input(path);
-+  return {std::istreambuf_iterator<char>(input),
-+          std::istreambuf_iterator<char>()};
++std::string GamepadGuid(SDL_JoystickID id) {
++  char buf[33] = {};
++  SDL_GUIDToString(SDL_GetGamepadGUIDForID(id), buf, sizeof(buf));
++  return std::string(buf);
 +}
-+
-+std::string ControllerProfileDevice(const std::string &text) {
-+  constexpr std::string_view marker = "Device = ";
-+  const std::size_t start = text.find(marker);
-+  if (start == std::string::npos)
-+    return {};
-+  const std::size_t begin = start + marker.size();
-+  const std::size_t end = text.find_first_of("\r\n", begin);
-+  return text.substr(begin, end == std::string::npos ? std::string::npos
-+                                                     : end - begin);
-+}
-+
-+moderngekko::frontend::ControllerLayout
-+ControllerProfileLayout(const std::string &text) {
-+  using moderngekko::frontend::ControllerLayout;
-+  if (text.find("Buttons/A = `RETURN`") != std::string::npos)
-+    return ControllerLayout::Keyboard;
-+  if (text.find("Buttons/A = `Button B`") != std::string::npos)
-+    return ControllerLayout::Nintendo;
-+  return ControllerLayout::Standard;
-+}
-+
 +struct ControllerDevice {
 +  std::string device;
 +  std::string guid;
-+  std::string mapping;
++  int sdl_type = 0; // SDL_GamepadType of the first enumerated pad
 +};
 +
++// Picks the configured pad when it is present, otherwise the first enumerated
++// one. Nothing is written to disk here; the runtime binds the pad through the
++// emulated controller's default device, including after a hot-plug.
 +ControllerDevice ChooseControllerDevice(std::string_view preferred) {
 +  constexpr std::string_view keyboard = "DInput/0/Keyboard Mouse";
++  ControllerDevice scan;
 +  if (preferred == keyboard)
-+    return {std::string(keyboard), {}, {}};
++    return scan;
 +
 +  int count = 0;
 +  SDL_JoystickID *ids = SDL_GetJoysticks(&count);
@@ -3222,10 +3180,11 @@ index d6b3569..9b2791f 100644
 +        continue;
 +      ControllerDevice candidate;
 +      candidate.device = "SDL/0/" + std::string(name);
-+      candidate.guid = GamepadGuid(ids[i]);
-+      char *mapping = SDL_GetGamepadMappingForID(ids[i]);
-+      candidate.mapping = mapping ? mapping : "";
-+      SDL_free(mapping);
++      char guid_text[33]{};
++      SDL_GUIDToString(SDL_GetGamepadGUIDForID(ids[i]), guid_text,
++                       static_cast<int>(sizeof(guid_text)));
++      candidate.guid = guid_text;
++      candidate.sdl_type = static_cast<int>(SDL_GetGamepadTypeForID(ids[i]));
 +      if (first.device.empty())
 +        first = candidate;
 +      if (candidate.device == preferred)
@@ -3233,34 +3192,39 @@ index d6b3569..9b2791f 100644
 +    }
 +  }
 +  SDL_free(ids);
-+  return !match.device.empty() ? match : first;
++  scan = !match.device.empty() ? match : first;
++  if (!scan.device.empty() && !preferred.empty() && preferred != keyboard &&
++      scan.device != preferred)
++    std::cerr << "controller: configured device \"" << preferred
++              << "\" not found; binding \"" << scan.device << "\"\n";
++  return scan;
 +}
 +
-+// Startup diagnostic: name / GUID / VID:PID / layout / dpad, plus SDL's
-+// GUID-resolved mapping string and the profile action. Players can send these
-+// two lines for support; --list-controllers prints the same per pad.
++// The only startup controller line players need to quote. Anything that decides
++// button order is named here: guid, SDL type, class and the bound device.
 +void LogControllerDiagnostic(const ControllerDevice &dev,
-+                             const moderngekko::frontend::ControllerMapping &mapping) {
++                             std::string_view controller_class,
++                             bool profile_exists) {
 +  std::string vid, pid;
 +  GuidVidPid(dev.guid, vid, pid);
-+  const bool keyboard = mapping.layout ==
-+                        moderngekko::frontend::ControllerLayout::Keyboard;
-+  std::cerr << "controller: name=\""
-+            << (dev.device.empty() ? "none (keyboard fallback)" : dev.device)
++  const char *class_name = "positional";
++  if (controller_class == "nintendo")
++    class_name = "nintendo";
++  else if (controller_class == "auto")
++    class_name = "auto (per pad)";
++  std::cerr << "controller: name=\"" << (dev.device.empty() ? "none" : dev.device)
 +            << "\" guid=" << (dev.guid.empty() ? "n/a" : dev.guid)
 +            << " vid=" << (dev.guid.empty() ? "n/a" : vid)
-+            << " pid=" << (dev.guid.empty() ? "n/a" : pid) << " layout="
-+            << moderngekko::frontend::ControllerLayoutName(mapping.layout)
-+            << " dpad=" << (mapping.swap_dpad_lr ? "swapped" : "normal")
-+            << " source=" << (keyboard ? "keyboard" : "sdl") << '\n';
-+  if (!dev.mapping.empty())
-+    std::cerr << "controller:   sdl_mapping=" << dev.mapping << '\n';
++            << " pid=" << (dev.guid.empty() ? "n/a" : pid)
++            << " sdl_type=" << dev.sdl_type << " class=" << class_name
++            << " dpad=normal profile=" << (profile_exists ? "static" : "missing")
++            << "\n";
 +}
 +
-+// Console-only probe (no game boot, no window): list connected gamepads with the
-+// GUID/layout diagnostic. Useful for players to confirm a pad is recognized.
++// Console-only probe (no game boot, no window): the same startup line per pad.
 +int ListControllers() {
-+  if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
++  ApplyRuntimeSdlHints();
++  if (!SDL_Init(SDL_INIT_GAMEPAD)) {
 +    std::cerr << "controller: SDL init failed: " << SDL_GetError() << '\n';
 +    return 1;
 +  }
@@ -3278,12 +3242,8 @@ index d6b3569..9b2791f 100644
 +      ControllerDevice dev;
 +      dev.device = std::string("SDL/0/") + (name && *name ? name : "Unknown Controller");
 +      dev.guid = GamepadGuid(ids[i]);
-+      char *mapping = SDL_GetGamepadMappingForID(ids[i]);
-+      dev.mapping = mapping ? mapping : "";
-+      SDL_free(mapping);
-+      const auto resolved =
-+          moderngekko::frontend::DetectControllerMapping(dev.device, dev.mapping, dev.guid);
-+      LogControllerDiagnostic(dev, resolved);
++      dev.sdl_type = static_cast<int>(SDL_GetGamepadTypeForID(ids[i]));
++      LogControllerDiagnostic(dev, "auto", true);
 +      ++pads;
 +    }
 +  }
@@ -3294,133 +3254,36 @@ index d6b3569..9b2791f 100644
 +  return 0;
 +}
 +
-+// Wait up to `timeout_ms` for a gamepad to appear. Bluetooth Xbox pads, DualSense
-+// and pads behind a hub can take several hundred milliseconds to enumerate, and
-+// this detect runs before the window exists. Concluding "no pad" too early used
-+// to replace a working Xbox profile with the keyboard one (v0.1.5 regression).
-+bool WaitForGamepad(int timeout_ms) {
-+  const auto deadline = std::chrono::steady_clock::now() +
-+                        std::chrono::milliseconds(timeout_ms);
-+  for (;;) {
-+    int count = 0;
-+    bool found = false;
-+    SDL_JoystickID *ids = SDL_GetJoysticks(&count);
-+    if (ids) {
-+      for (int i = 0; i < count && !found; ++i)
-+        found = SDL_IsGamepad(ids[i]);
-+    }
-+    SDL_free(ids);
-+    if (found)
-+      return true;
-+    if (std::chrono::steady_clock::now() >= deadline)
-+      return false;
-+    SDL_PumpEvents();
-+    SDL_Delay(50);
-+  }
-+}
-+
-+// Detect the connected pad, choose its button family from the LIVE SDL mapping
-+// (per GUID, not name), and keep a working profile. Default profiles migrate to
-+// the detected layout; hand-edited (custom) profiles are preserved; an explicit
-+// controller_layout / --controller-layout forces a layout. Mirrors the WMX8 fix
-+// for 8BitDo Nintendo-layout pads (A/B and X/Y reversed) without a blanket rule.
-+void EnsureDefaultControllerConfig(
-+    const std::filesystem::path &user_directory,
-+    moderngekko::frontend::ControllerLayout requested_layout,
-+    std::string_view preferred_device) {
-+  using moderngekko::frontend::ControllerLayout;
-+  using moderngekko::frontend::ControllerMapping;
-+
-+  if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
++// ONE canonical profile, written only when missing. No scan decides its content
++// and nothing rewrites it later: the class travels to the runtime, which applies
++// A<->B / X<->Y per pad in the input layer.
++void EnsureControllerSetup(const std::filesystem::path &user_directory,
++                           std::string_view controller_class,
++                           std::string_view preferred_device) {
++  ApplyRuntimeSdlHints();
++  if (!SDL_Init(SDL_INIT_GAMEPAD)) {
 +    std::cerr << "controller: SDL init failed: " << SDL_GetError() << '\n';
 +    return;
 +  }
 +  RegisterProControllerMappings();
 +
 +  constexpr std::string_view keyboard_device = "DInput/0/Keyboard Mouse";
-+  const bool keyboard_requested = requested_layout == ControllerLayout::Keyboard;
-+  // A pad that is switched on but not enumerated yet must not read as "absent".
-+  if (!keyboard_requested)
-+    WaitForGamepad(800);
-+  ControllerDevice chosen =
-+      keyboard_requested ? ControllerDevice{} : ChooseControllerDevice(preferred_device);
-+  const bool pad_missing = !keyboard_requested && chosen.device.empty();
-+  std::string device = chosen.device;
-+  if (keyboard_requested || device.empty())
-+    device = std::string(keyboard_device);
++  const ControllerDevice chosen = ChooseControllerDevice(preferred_device);
++  const std::string device =
++      chosen.device.empty() ? std::string(keyboard_device) : chosen.device;
 +
-+  ControllerMapping mapping =
-+      moderngekko::frontend::DetectControllerMapping(device, chosen.mapping,
-+                                                     chosen.guid);
-+  if (device == keyboard_device) {
-+    mapping = {ControllerLayout::Keyboard, false};
-+  } else if (requested_layout != ControllerLayout::Auto) {
-+    mapping.layout = requested_layout;
-+  }
-+  if (mapping.layout == ControllerLayout::Keyboard)
-+    mapping.swap_dpad_lr = false;
++  std::string message;
++  if (!moderngekko::frontend::EnsureCanonicalPadProfile(user_directory, device,
++                                                       &message))
++    std::cerr << "controller configuration failed: " << message << '\n';
++  else if (!chosen.device.empty())
++    std::cerr << "controller configuration: " << message << '\n';
 +
-+  const std::filesystem::path profile_path =
-+      user_directory / "Config" / "GCPadNew.ini";
-+  const std::string existing = ReadTextFile(profile_path);
-+  const bool exists = !existing.empty();
-+  const std::string existing_device = ControllerProfileDevice(existing);
-+  const ControllerLayout existing_layout = ControllerProfileLayout(existing);
-+  const bool existing_dpad_swapped =
-+      moderngekko::frontend::ControllerProfileDpadSwapped(existing);
-+
-+  // No pad this boot (and the player did not ask for the keyboard): never write
-+  // the keyboard fallback over a real controller profile. v0.1.5 did, so an
-+  // Xbox pad that was off, asleep or still pairing when the game started lost
-+  // its profile and then produced no input at all - the reported "Xbox
-+  // controllers not working" regression. Keep the profile, say why, and only
-+  // fall back to the keyboard on a fresh install that has nothing to preserve.
-+  if (!keyboard_requested && pad_missing) {
-+    if (exists) {
-+      std::cerr << "controller: name=\"none\" vid=n/a pid=n/a layout="
-+                << moderngekko::frontend::ControllerLayoutName(existing_layout)
-+                << " dpad=" << (existing_dpad_swapped ? "swapped" : "normal")
-+                << " source=none profile=kept (" << existing_device
-+                << "); no SDL gamepad detected this boot\n"
-+                   "controller:   switch the pad on before launching, then "
-+                   "relaunch; run with --list-controllers to check detection\n";
-+      SDL_Quit();
-+      return;
-+    }
-+    std::cerr << "controller: no SDL gamepad detected; writing the keyboard "
-+                 "fallback. Run with --list-controllers to check detection\n";
-+  }
-+
-+  LogControllerDiagnostic(chosen, mapping);
-+
-+  bool regenerate = !exists || existing_device != device;
-+  if (!regenerate && requested_layout != ControllerLayout::Auto)
-+    regenerate = existing_layout != mapping.layout;
-+  if (!regenerate && requested_layout == ControllerLayout::Auto &&
-+      existing_layout != mapping.layout &&
-+      moderngekko::frontend::ControllerProfileIsDefault(existing, existing_layout))
-+    regenerate = true;
-+  if (!regenerate && existing_dpad_swapped != mapping.swap_dpad_lr &&
-+      moderngekko::frontend::ControllerProfileIsDefault(existing, existing_layout))
-+    regenerate = true;
-+
-+  if (regenerate) {
-+    std::string message;
-+    if (moderngekko::frontend::GenerateControllerConfig(
-+            user_directory, device, mapping, &message))
-+      std::cerr << "controller: profile=generated (" << device << ") layout="
-+                << moderngekko::frontend::ControllerLayoutName(mapping.layout)
-+                << " dpad=" << (mapping.swap_dpad_lr ? "swapped" : "normal")
-+                << "; " << message << '\n';
-+    else
-+      std::cerr << "controller configuration failed: " << message << '\n';
-+  } else {
-+    std::cerr << "controller: profile=kept (" << existing_device << ") layout="
-+              << moderngekko::frontend::ControllerLayoutName(existing_layout)
-+              << " dpad=" << (existing_dpad_swapped ? "swapped" : "normal")
-+              << '\n';
-+  }
-+  SDL_Quit();
++  LogControllerDiagnostic(
++      chosen, controller_class,
++      moderngekko::frontend::ControllerConfigExists(user_directory));
++  // Deliberately no SDL_Quit(): the runtime's own SDL input backend re-inits and
++  // reuses this driver set, and the class override is applied there.
 +}
 +
  void Usage() {
@@ -3436,7 +3299,7 @@ index d6b3569..9b2791f 100644
                 "       [--netplay-host | --netplay-join <host>] "
                 "[--netplay-port <port>]\n"
                 "       [--nickname <name>] [--buffer <auto|1-20>] "
-@@ -141,12 +449,14 @@ int RunMain(int argc, char **argv) {
+@@ -141,12 +341,14 @@ int RunMain(int argc, char **argv) {
    config.window_title = MODERNGEKKO_DEFAULT_WINDOW_TITLE;
  #endif
    std::filesystem::path module_path;
@@ -3451,7 +3314,7 @@ index d6b3569..9b2791f 100644
    std::vector<std::string> netplay_controllers;
    for (int i = 1; i < argc; ++i) {
      const std::string arg = argv[i];
-@@ -161,7 +471,14 @@ int RunMain(int argc, char **argv) {
+@@ -161,7 +363,14 @@ int RunMain(int argc, char **argv) {
        config.game_root = value("--game");
      else if (arg == "--module")
        module_path = value("--module");
@@ -3467,7 +3330,7 @@ index d6b3569..9b2791f 100644
        config.user_directory = value("--user-dir");
      else if (arg == "--title")
        config.window_title = value("--title");
-@@ -220,7 +537,23 @@ int RunMain(int argc, char **argv) {
+@@ -220,7 +429,23 @@ int RunMain(int argc, char **argv) {
        netplay_buffer = value("--buffer");
      else if (arg == "--controller")
        netplay_controllers.emplace_back(value("--controller"));
@@ -3492,7 +3355,7 @@ index d6b3569..9b2791f 100644
        Usage();
        return 0;
      } else {
-@@ -245,25 +578,57 @@ int RunMain(int argc, char **argv) {
+@@ -245,25 +470,62 @@ int RunMain(int argc, char **argv) {
      std::cerr << "invalid config.ini: " << frontend_config.error << '\n';
      return 2;
    }
@@ -3540,26 +3403,30 @@ index d6b3569..9b2791f 100644
 -            &controller_message)) {
 -      std::cerr << "controller configuration: " << controller_message << '\n';
 -      return 2;
--    }
--    std::cout << "controller configuration: " << controller_message << '\n';
 +  if (!netplay_role) {
-+    using moderngekko::frontend::ControllerLayout;
-+    ControllerLayout layout = ControllerLayout::Auto;
-+    const std::string &layout_value =
-+        controller_layout_override.empty() ? frontend_config.controller_layout
-+                                           : controller_layout_override;
-+    if (layout_value == "standard")
-+      layout = ControllerLayout::Standard;
-+    else if (layout_value == "nintendo")
-+      layout = ControllerLayout::Nintendo;
-+    else if (layout_value == "keyboard")
-+      layout = ControllerLayout::Keyboard;
-+    EnsureDefaultControllerConfig(config.user_directory, layout,
-+                                  frontend_config.controller);
++    using moderngekko::frontend::ControllerClass;
++    ControllerClass controller_class = ControllerClass::Auto;
++    std::string preferred_device = frontend_config.controller;
++    const std::string &class_value = controller_layout_override.empty()
++                                         ? frontend_config.controller_class
++                                         : controller_layout_override;
++    std::string class_lower = class_value;
++    for (char &c : class_lower)
++      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
++    if (class_lower == "keyboard") {
++      preferred_device = "DInput/0/Keyboard Mouse";
++    } else if (!moderngekko::frontend::ParseControllerClass(class_lower,
++                                                            &controller_class)) {
++      controller_class = ControllerClass::Auto;
+     }
+-    std::cout << "controller configuration: " << controller_message << '\n';
++    config.controller_class = class_lower.empty() ? "auto" : class_lower;
++    EnsureControllerSetup(config.user_directory, config.controller_class,
++                          preferred_device);
    }
  
  #ifdef MODERNGEKKO_DOL_PATCH_MANIFEST
-@@ -314,7 +679,9 @@ int RunMain(int argc, char **argv) {
+@@ -314,7 +576,9 @@ int RunMain(int argc, char **argv) {
  #endif
  
    // Compatibility discovery belongs to the runner, never the runtime library.
@@ -3570,7 +3437,7 @@ index d6b3569..9b2791f 100644
      if (const char *env = std::getenv("STATICRECOMP_MODULE"))
        module_path = env;
      else {
-@@ -329,7 +696,7 @@ int RunMain(int argc, char **argv) {
+@@ -329,7 +593,7 @@ int RunMain(int argc, char **argv) {
          module_path = user_module;
      }
    }
@@ -3579,7 +3446,20 @@ index d6b3569..9b2791f 100644
      config.module =
          moderngekko::ModuleSource::DynamicPath(std::move(module_path));
  
-@@ -458,6 +825,8 @@ void PinProcessToLargestCache() {
+@@ -369,8 +633,10 @@ int RunMain(int argc, char **argv) {
+     frontend_config.controllers = options.controllers;
+     frontend_config.controller = options.controllers.front();
+     std::string controller_message;
+-    if (!moderngekko::frontend::EnsureControllerConfig(
+-            config.user_directory, options.controllers, &controller_message)) {
++    // Canonical profile only: netplay does not generate per-pad profiles.
++    if (!moderngekko::frontend::EnsureCanonicalPadProfile(
++            config.user_directory, options.controllers.front(),
++            &controller_message)) {
+       std::cerr << "controller configuration: " << controller_message << '\n';
+       return 2;
+     }
+@@ -458,6 +724,8 @@ void PinProcessToLargestCache() {
  int main(int argc, char **argv) {
    try {
  #if defined(_WIN32)
@@ -3588,3 +3468,25 @@ index d6b3569..9b2791f 100644
      PinProcessToLargestCache();
  #endif
      return RunMain(argc, argv);
+diff --git a/tools/netplay_session.cpp b/tools/netplay_session.cpp
+index 7ef27ba..8788690 100644
+--- a/tools/netplay_session.cpp
++++ b/tools/netplay_session.cpp
+@@ -464,8 +464,9 @@ bool RunLobbyWindow(RuntimeConfig &runtime_config,
+         frontend_config.controllers = options.controllers;
+         frontend_config.controller = options.controllers.front();
+         std::string error;
+-        if (GenerateControllerConfig(runtime_config.user_directory,
+-                                     options.controllers, &error) &&
++        // Canonical profile only: no per-pad generation in netplay either.
++        if (EnsureCanonicalPadProfile(runtime_config.user_directory,
++                                      options.controllers.front(), &error) &&
+             SaveConfig(runtime_config.user_directory, frontend_config,
+                        &error)) {
+           client.SetLocalControllerCount(
+diff --git a/vendor/dolphin b/vendor/dolphin
+--- a/vendor/dolphin
++++ b/vendor/dolphin
+@@ -1 +1 @@
+-Subproject commit 10f7ac4fe48f74485fbc161ebf4d67242e11e671
++Subproject commit 10f7ac4fe48f74485fbc161ebf4d67242e11e671-dirty

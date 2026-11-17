@@ -161,8 +161,41 @@ code/analysis/build/docs work is allowed.
 
 ## Release
 
-- Version: **v0.1.8** (launcher power/crash fix; published 2026-11-16).
-  Prior: v0.1.7 (controller profile + memory card hotfix), v0.1.5.
+- Version: **v0.1.9** (canonical controller system; published 2026-11-17).
+  Prior: v0.1.8 (launcher power/crash), v0.1.7 (controller profile + memcard).
+- v0.1.9 replaces the per-device controller system with the canonical design
+  proven in WWE WrestleMania X8 v0.1.4 (port of its patch + design note):
+  - ONE static `GCPadNew.ini` (positional SDL bindings), written only when
+    missing, never rewritten; two classes resolved per pad in the SDL input
+    layer from `SDL_GetGamepadType` (`positional`, `nintendo` = A<->B, X<->Y
+    only; D-pad/sticks/triggers untouched) plus one 8BitDo Switch-mode GUID
+    fallback; override `controller_class` / `--controller-layout`.
+  - Runtime binds the first gamepad in memory (`SetDefaultDevice` +
+    `UpdateReferences`) when the configured device is absent, plus a 2 s
+    hot-plug watcher; no profile write, no restart.
+  - Deleted: GUID/product tables, `DetectControllerMapping`,
+    `GenerateControllerConfig`/`EnsureControllerConfig`, migration, the `a>b`
+    heuristic, the D-pad swap rule. New files:
+    `vendor/dolphin/.../SDL/LayoutClass.h` (class + `ResolveLayoutClass`),
+    `patches/dolphin-controller-layout.patch` (nested Dolphin submodule delta,
+    applied by `scripts/apply-patches.ps1`).
+  - Reference defects fixed in the port: the override never reached the input
+    layer (two different atomics - `SetLayoutClassOverride` wrote a header value
+    nothing read); the class was re-resolved on every button poll (now cached per
+    pad); and first-pad fallback bound the DInput keyboard (now prefers an
+    `SDL/` device string).
+  - Verified: offline matrix 37 checks PASS (class per SDL type, override
+    precedence, canonical profile byte-identical across calls, config
+    round-trip, legacy key); native test PASS; real Xbox One controller
+    (`045e:02ff`, `sdl_type=3`) -> positional, profile SHA identical across two
+    boots, stale-device case logged `bound "SDL/0/Xbox One Controller"`;
+    packaged artifact boots 59.93 fps / vps 59.9401 with memcard intact.
+  - Not verified: physical A/B/X/Y presses per family (no Switch/8BitDo here)
+    and a real unplug/replug hot-plug; the watcher uses the same binding path.
+- Package (v0.1.9): zip SHA-256
+  `77503e23370a27d6ef9fdc3b5ee166cc7c29395d670147c9f57ef10dfe3cc1f5`; exes
+  0.1.9.0; game-data scan clean; boot smoke from the expanded zip above.
+- Release notes: `dist/release-notes-v0.1.9.md`.
 - v0.1.8 adds the **launcher fix** (player report: "very power heavy ... and will
   crash, so i can't adjust settings"):
   - Root cause: `SDL_CreateRenderer(window, "software")` was tried FIRST and never
@@ -270,11 +303,10 @@ code/analysis/build/docs work is allowed.
 - Download-back verified (v0.1.7): asset SHA-256 matches `SHA256SUMS.txt` and the
   local build (`151206e5…f96c55`, 33,764,697 bytes); release public, not a draft;
   assets: zip + SHA256SUMS only; game-data scan clean on the downloaded zip.
-- Published: **yes** (v0.1.8) - https://github.com/Spaced1127/DOR2-Static-Recomp/releases/tag/v0.1.8
-  (user-approved 2026-11-16; assets `DOR2StaticRecomp-v0.1.8-Windows-x64.zip` +
-  `SHA256SUMS.txt`). Prior: v0.1.7, v0.1.5 (69f9a5d), v0.1.4 (0de9381),
-  v0.1.3 (96de8a8), v0.1.2 (1b5585f), v0.1.1 (c31cb7f), v0.1.0 (7f11135).
-- Package (v0.1.8): zip SHA-256
+- Published: **yes** (v0.1.9) - https://github.com/Spaced1127/DOR2-Static-Recomp/releases/tag/v0.1.9
+  (user-approved 2026-11-17). Prior: v0.1.8, v0.1.7, v0.1.5 (69f9a5d),
+  v0.1.4 (0de9381), v0.1.3 (96de8a8), v0.1.2 (1b5585f), v0.1.1 (c31cb7f),
+  v0.1.0 (7f11135).
   `b935ca666d2f3a7bfbff499112d48c888ba2a8727633b181ca6839bd011974e3`; exes
   0.1.8.0; game-data scan clean; staged-artifact boot smoke (visible window, JIT):
   `booted=1`, fps 59.9423 / vps 59.9396 / speed 1, frames 1091, graceful
