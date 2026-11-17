@@ -1078,10 +1078,10 @@ index 3b18d05..d640586 100644
                              std::span<const std::string> controllers,
                              std::string *message);
 diff --git a/tools/moderngekko_launcher.cpp b/tools/moderngekko_launcher.cpp
-index 7699c3d..69538b7 100644
+index 7699c3d..4b3d6e6 100644
 --- a/tools/moderngekko_launcher.cpp
 +++ b/tools/moderngekko_launcher.cpp
-@@ -13,13 +13,26 @@
+@@ -13,13 +13,27 @@
  #include <imgui_impl_sdl3.h>
  #include <imgui_impl_sdlrenderer3.h>
  
@@ -1100,6 +1100,7 @@ index 7699c3d..69538b7 100644
 +#include <cmath>
  #include <atomic>
 +#include <cctype>
++#include <cstdarg>
  #include <cstdio>
  #include <cstdlib>
  #include <filesystem>
@@ -1108,7 +1109,7 @@ index 7699c3d..69538b7 100644
  #include <iostream>
  #include <mutex>
  #include <optional>
-@@ -65,12 +78,16 @@ struct ExtractionState
+@@ -65,12 +79,16 @@ struct ExtractionState
    std::string status;
    std::string error;
    std::optional<fs::path> finished_game;
@@ -1125,7 +1126,7 @@ index 7699c3d..69538b7 100644
    std::string error;
  };
  
-@@ -337,7 +354,7 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
+@@ -337,7 +355,7 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
    }
    return output;
  #else
@@ -1134,7 +1135,7 @@ index 7699c3d..69538b7 100644
    return std::nullopt;
  #endif
  }
-@@ -345,8 +362,18 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
+@@ -345,8 +363,18 @@ std::optional<fs::path> PrepareDisc(const fs::path& image, const fs::path& user_
  bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
                   const fs::path& release_directory, ExtractionState* state)
  {
@@ -1153,7 +1154,7 @@ index 7699c3d..69538b7 100644
      std::lock_guard lock(state->mutex);
      state->error = std::move(message);
      state->running = false;
-@@ -357,6 +384,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
+@@ -357,6 +385,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
      std::lock_guard lock(state->mutex);
      state->status = "Opening " + image.filename().string();
    }
@@ -1161,7 +1162,7 @@ index 7699c3d..69538b7 100644
    std::string preparation_error;
    const std::optional<fs::path> prepared =
        PrepareDisc(image, user_directory, release_directory, state, &preparation_error);
-@@ -404,6 +432,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
+@@ -404,6 +433,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
      state->finished_game = output;
      state->status = "Using existing extraction";
      state->running = false;
@@ -1169,7 +1170,7 @@ index 7699c3d..69538b7 100644
      return true;
    }
  
-@@ -428,13 +457,22 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
+@@ -428,13 +458,22 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
      std::lock_guard lock(state->mutex);
      state->status = "Extracting game files";
    }
@@ -1195,7 +1196,7 @@ index 7699c3d..69538b7 100644
                              return false;
                            });
  
-@@ -446,6 +484,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
+@@ -446,6 +485,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
      return fail("extracted DOL patching failed: " + dol_patch_error);
    }
  
@@ -1203,7 +1204,7 @@ index 7699c3d..69538b7 100644
    const auto inspected = moderngekko::InspectGame(staging);
    if (!inspected)
    {
-@@ -472,6 +511,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
+@@ -472,6 +512,7 @@ bool ExtractDisc(const fs::path& image, const fs::path& user_directory,
      std::lock_guard lock(state->mutex);
      state->finished_game = output;
      state->status = "Extraction complete";
@@ -1211,10 +1212,53 @@ index 7699c3d..69538b7 100644
    }
    state->running = false;
    return true;
-@@ -487,6 +527,16 @@ void SDLCALL FileDialogCallback(void* userdata, const char* const* filelist, int
+@@ -487,6 +528,59 @@ void SDLCALL FileDialogCallback(void* userdata, const char* const* filelist, int
      state->selected = filelist[0];
  }
  
++// Launcher log: crash reports arrived with "no log", and stdout/stderr are
++// invisible when the launcher is started from Explorer/RecompLauncher. Mirror
++// everything into <user>\Logs\launcher.log (truncated per run) so the next
++// report is actionable.
++FILE* g_launcher_log = nullptr;
++
++void SDLCALL LauncherLogOutput(void*, int, SDL_LogPriority priority,
++                               const char* message)
++{
++  const char* level = "log";
++  switch (priority)
++  {
++  case SDL_LOG_PRIORITY_VERBOSE: level = "verbose"; break;
++  case SDL_LOG_PRIORITY_DEBUG: level = "debug"; break;
++  case SDL_LOG_PRIORITY_INFO: level = "info"; break;
++  case SDL_LOG_PRIORITY_WARN: level = "warn"; break;
++  case SDL_LOG_PRIORITY_ERROR: level = "error"; break;
++  case SDL_LOG_PRIORITY_CRITICAL: level = "critical"; break;
++  default: break;
++  }
++  std::fprintf(stderr, "[%s] %s\n", level, message);
++  if (g_launcher_log)
++  {
++    std::fprintf(g_launcher_log, "[%s] %s\n", level, message);
++    std::fflush(g_launcher_log);
++  }
++}
++
++void LauncherLogLine(const char* format, ...)
++{
++  char buffer[1024];
++  va_list args;
++  va_start(args, format);
++  std::vsnprintf(buffer, sizeof(buffer), format, args);
++  va_end(args);
++  std::fprintf(stderr, "%s\n", buffer);
++  if (g_launcher_log)
++  {
++    std::fprintf(g_launcher_log, "%s\n", buffer);
++    std::fflush(g_launcher_log);
++  }
++}
++
 +void SDLCALL FolderDialogCallback(void* userdata, const char* const* filelist, int)
 +{
 +  auto* state = static_cast<DialogState*>(userdata);
@@ -1228,7 +1272,7 @@ index 7699c3d..69538b7 100644
  fs::path SiblingRunner(const char* argv0)
  {
    std::error_code ec;
-@@ -502,7 +552,13 @@ fs::path SiblingRunner(const char* argv0)
+@@ -502,7 +596,13 @@ fs::path SiblingRunner(const char* argv0)
  
  int main(int argc, char** argv)
  {
@@ -1242,7 +1286,7 @@ index 7699c3d..69538b7 100644
    std::optional<fs::path> extract_only;
    for (int i = 1; i < argc; ++i)
    {
-@@ -510,6 +566,10 @@ int main(int argc, char** argv)
+@@ -510,6 +610,10 @@ int main(int argc, char** argv)
        use_wayland = false;
      else if (std::string_view(argv[i]) == "--wayland")
        use_wayland = true;
@@ -1253,7 +1297,7 @@ index 7699c3d..69538b7 100644
      else if (std::string_view(argv[i]) == "--extract" && i + 1 < argc)
        extract_only = argv[++i];
    }
-@@ -520,6 +580,7 @@ int main(int argc, char** argv)
+@@ -520,6 +624,7 @@ int main(int argc, char** argv)
    {
      ExtractionState extraction;
      extraction.running = true;
@@ -1261,7 +1305,7 @@ index 7699c3d..69538b7 100644
      const bool success =
          ExtractDisc(*extract_only, user_directory, release_directory, &extraction);
      std::lock_guard lock(extraction.mutex);
-@@ -533,12 +594,80 @@ int main(int argc, char** argv)
+@@ -533,12 +638,80 @@ int main(int argc, char** argv)
    auto config = moderngekko::frontend::LoadConfig(user_directory, true);
    if (!config)
    {
@@ -1345,9 +1389,24 @@ index 7699c3d..69538b7 100644
  #if defined(__linux__)
    SDL_SetHint(SDL_HINT_VIDEO_DRIVER, use_wayland ? "wayland" : "x11");
  #endif
-@@ -547,8 +676,8 @@ int main(int argc, char** argv)
+@@ -546,9 +719,23 @@ int main(int argc, char** argv)
+   if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD))
      return 1;
  
++  {
++    std::error_code log_ec;
++    fs::create_directories(user_directory / "Logs", log_ec);
++    g_launcher_log =
++        std::fopen((user_directory / "Logs" / "launcher.log").string().c_str(), "w");
++    if (g_launcher_log)
++    {
++      SDL_SetLogOutputFunction(LauncherLogOutput, nullptr);
++      SDL_SetLogPriorities(SDL_LOG_PRIORITY_INFO);
++      LauncherLogLine("launcher: log opened (SDL %d.%d.%d)", SDL_MAJOR_VERSION,
++                      SDL_MINOR_VERSION, SDL_MICRO_VERSION);
++    }
++  }
++
    const float scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
 -  SDL_Window* window = SDL_CreateWindow(MODERNGEKKO_FRONTEND_NAME, static_cast<int>(820 * scale),
 -                                        static_cast<int>(700 * scale),
@@ -1356,16 +1415,47 @@ index 7699c3d..69538b7 100644
                                          SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
    if (!window)
    {
-@@ -556,7 +685,7 @@ int main(int argc, char** argv)
+@@ -556,9 +743,21 @@ int main(int argc, char** argv)
      SDL_Quit();
      return 1;
    }
 -  SDL_Renderer* renderer = SDL_CreateRenderer(window, "vulkan");
-+  SDL_Renderer* renderer = SDL_CreateRenderer(window, "software");
++  // Prefer the GPU renderer. v0.1.5 (and earlier) asked for the *software*
++  // renderer first - it never fails, so every launcher run rasterised the whole
++  // window (scaled background + translucent overlay + ImGui geometry) on the CPU
++  // with no usable vsync, which pegged a core and burned GPU power for an idle
++  // menu (player report: "very power heavy ... and will crash"). Software stays
++  // as a last-resort fallback for machines with no usable GPU driver.
++  SDL_Renderer* renderer = SDL_CreateRenderer(window, nullptr);
++  const char* renderer_name = renderer ? SDL_GetRendererName(renderer) : nullptr;
++  bool software_renderer = false;
    if (!renderer)
-     renderer = SDL_CreateRenderer(window, nullptr);
+-    renderer = SDL_CreateRenderer(window, nullptr);
++  {
++    renderer = SDL_CreateRenderer(window, "software");
++    renderer_name = renderer ? "software" : nullptr;
++    software_renderer = renderer != nullptr;
++  }
    if (!renderer)
-@@ -574,11 +703,100 @@ int main(int argc, char** argv)
+   {
+     SDL_Log("SDL_CreateRenderer failed: %s", SDL_GetError());
+@@ -566,7 +765,14 @@ int main(int argc, char** argv)
+     SDL_Quit();
+     return 1;
+   }
+-  SDL_SetRenderVSync(renderer, 1);
++  // Vsync where the backend supports it; otherwise the loop is capped to 60 fps
++  // below so an idle menu can never spin a core.
++  const bool vsync_enabled = SDL_SetRenderVSync(renderer, 1) == 0;
++  LauncherLogLine("[ui] renderer=%s vsync=%s",
++                  renderer_name ? renderer_name : "unknown",
++                  vsync_enabled ? "on" : "off (capped to 60 fps)");
++  if (software_renderer)
++    LauncherLogLine("[ui] no GPU renderer available; using the software fallback");
+ 
+   IMGUI_CHECKVERSION();
+   ImGui::CreateContext();
+@@ -574,11 +780,100 @@ int main(int argc, char** argv)
    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
    io.IniFilename = nullptr;
    ImGui::StyleColorsDark();
@@ -1468,7 +1558,7 @@ index 7699c3d..69538b7 100644
    std::vector<fs::path> images = FindDiscImages();
    std::optional<fs::path> selected_image = images.empty() ? std::nullopt : std::optional(images[0]);
    fs::path current_game = ReadDefaultGame(user_directory, release_directory);
-@@ -596,6 +814,21 @@ int main(int argc, char** argv)
+@@ -596,6 +891,21 @@ int main(int argc, char** argv)
        moderngekko::frontend::SupportedGraphicsBackends();
    bool show_fps_in_title = config.show_fps_in_title;
    bool fullscreen = config.fullscreen;
@@ -1490,7 +1580,7 @@ index 7699c3d..69538b7 100644
    std::array<char, 31> netplay_nickname{};
    std::array<char, 256> netplay_address{};
    std::snprintf(netplay_nickname.data(), netplay_nickname.size(), "%s",
-@@ -631,7 +864,30 @@ int main(int argc, char** argv)
+@@ -631,7 +941,30 @@ int main(int argc, char** argv)
    // newest file automatically could try to resume a different title.
    int selected_savestate = -1;
  
@@ -1521,7 +1611,7 @@ index 7699c3d..69538b7 100644
    std::vector<ControllerOption> controllers = EnumerateControllers();
    bool controller_profile_exists = moderngekko::frontend::ControllerConfigExists(user_directory);
    std::vector<std::string> configured_controllers =
-@@ -639,31 +895,37 @@ int main(int argc, char** argv)
+@@ -639,31 +972,37 @@ int main(int argc, char** argv)
    std::string selected_controller =
        configured_controllers.empty() ? config.controller : configured_controllers.front();
    int controller_index = FindController(controllers, selected_controller);
@@ -1568,7 +1658,7 @@ index 7699c3d..69538b7 100644
      controller_profile_exists = true;
      controller_status = std::move(message);
      return true;
-@@ -716,6 +978,26 @@ int main(int argc, char** argv)
+@@ -716,6 +1055,26 @@ int main(int argc, char** argv)
      }
    };
    refresh_controllers();
@@ -1595,7 +1685,7 @@ index 7699c3d..69538b7 100644
    ExtractionState extraction;
    std::jthread extraction_thread;
    enum class LaunchMode
-@@ -727,6 +1009,12 @@ int main(int argc, char** argv)
+@@ -727,8 +1086,15 @@ int main(int argc, char** argv)
    };
    bool done = false;
    LaunchMode launch_mode = LaunchMode::None;
@@ -1607,8 +1697,11 @@ index 7699c3d..69538b7 100644
 +  }
    while (!done)
    {
++    const Uint64 frame_start_ns = SDL_GetTicksNS();
      bool controllers_changed = false;
-@@ -753,6 +1041,27 @@ int main(int argc, char** argv)
+     SDL_Event event;
+     while (SDL_PollEvent(&event))
+@@ -753,6 +1119,27 @@ int main(int argc, char** argv)
          dialog.selected.reset();
        }
      }
@@ -1636,7 +1729,7 @@ index 7699c3d..69538b7 100644
      {
        std::lock_guard lock(extraction.mutex);
        if (extraction.finished_game)
-@@ -774,328 +1083,796 @@ int main(int argc, char** argv)
+@@ -774,330 +1161,809 @@ int main(int argc, char** argv)
      ImGui_ImplSDL3_NewFrame();
      ImGui::NewFrame();
      const ImGuiViewport* viewport = ImGui::GetMainViewport();
@@ -1812,7 +1905,8 @@ index 7699c3d..69538b7 100644
 +    ImGui::TextDisabled("%s", game_ready ? "Game files verified" : "Import a disc to begin");
 +    ImGui::Unindent(16 * S);
 +    ImGui::EndChild();
-+
+ 
+-    if (current_metadata)
 +    // ------------------------------------------------------------------
 +    // Content
 +    // ------------------------------------------------------------------
@@ -1824,7 +1918,10 @@ index 7699c3d..69538b7 100644
 +                      ImGuiWindowFlags_NoBackground);
 +    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(20 * S, 18 * S));
 +    const auto begin_card = [&](const char* id, const char* title, float height)
-+    {
+     {
+-      ImGui::Text("Ready: %s [%s]", current_metadata.metadata->game_name.c_str(),
+-                  current_metadata.metadata->disc_id.c_str());
+-      if (!launcher_savestates.empty())
 +      ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.10f, 0.12f, 0.90f));
 +      ImGui::BeginChild(id, ImVec2(0, height * S), 0, ImGuiWindowFlags_NoScrollbar);
 +      ImGui::Indent(16 * S);
@@ -1853,13 +1950,9 @@ index 7699c3d..69538b7 100644
 +      persist_common();
 +      return save_config();
 +    };
- 
--    if (current_metadata)
++
 +    if (page == LauncherPage::Play)
-     {
--      ImGui::Text("Ready: %s [%s]", current_metadata.metadata->game_name.c_str(),
--                  current_metadata.metadata->disc_id.c_str());
--      if (!launcher_savestates.empty())
++    {
 +      if (ImGui::BeginTable("##play_row", 2, ImGuiTableFlags_SizingStretchSame))
        {
 -        ImGui::TextUnformatted("Start from savestate");
@@ -2013,7 +2106,7 @@ index 7699c3d..69538b7 100644
 +            }
 +          }
 +          ImGui::EndTable();
-+        }
+         }
 +        ImGui::Spacing();
 +        if (!launcher_savestates.empty())
 +        {
@@ -2045,7 +2138,7 @@ index 7699c3d..69538b7 100644
 +            ImGui::EndCombo();
 +          }
 +          ImGui::TextDisabled("Solo play only.");
-         }
++        }
 +        else
 +        {
 +          ImGui::TextDisabled("Savestates appear here after the game writes one.");
@@ -2313,14 +2406,9 @@ index 7699c3d..69538b7 100644
 +                                                        "4:3 standard", "Stretch"};
 +        ImGui::SetNextItemWidth(-1);
 +        if (ImGui::BeginCombo("##aspect", kAspectLabels[aspect_index]))
-         {
--          std::string error;
--          if (moderngekko::frontend::SaveConfig(user_directory, resolutions[i].text,
--                                                show_fps_in_title, selected_controller, &error))
++        {
 +          for (int i = 0; i < 4; ++i)
-           {
--            resolution_index = static_cast<int>(i);
--            config.resolution = resolutions[i].text;
++          {
 +            const bool selected = aspect_index == i;
 +            if (ImGui::Selectable(kAspectLabels[i], selected))
 +            {
@@ -2333,22 +2421,25 @@ index 7699c3d..69538b7 100644
 +            }
 +            if (selected)
 +              ImGui::SetItemDefaultFocus();
-           }
--          else
++          }
 +          ImGui::EndCombo();
 +        }
 +        if (ImGui::Checkbox("Widescreen hack (stretch 3D)", &widescreen_hack))
-+        {
+         {
+-          std::string error;
+-          if (moderngekko::frontend::SaveConfig(user_directory, resolutions[i].text,
+-                                                show_fps_in_title, selected_controller, &error))
 +          const bool previous = config.widescreen_hack;
 +          config.widescreen_hack = widescreen_hack;
 +          if (!save_or_report())
            {
--            std::lock_guard lock(dialog.mutex);
--            dialog.error = std::move(error);
+-            resolution_index = static_cast<int>(i);
+-            config.resolution = resolutions[i].text;
 +            widescreen_hack = previous;
 +            config.widescreen_hack = previous;
            }
-         }
+-          else
++        }
 +        end_card();
 +        ImGui::TableNextColumn();
 +        begin_card("##compat_card", "COMPATIBILITY", 214);
@@ -2357,11 +2448,13 @@ index 7699c3d..69538b7 100644
 +          const bool previous = config.efb_access;
 +          config.efb_access = efb_access;
 +          if (!save_or_report())
-+          {
+           {
+-            std::lock_guard lock(dialog.mutex);
+-            dialog.error = std::move(error);
 +            efb_access = previous;
 +            config.efb_access = previous;
-+          }
-+        }
+           }
+         }
 +        ImGui::TextWrapped("Required for the legal, title and menu screens. Accurate EFB "
 +                           "reads cost nothing in 3D.");
 +        end_card();
@@ -2677,8 +2770,21 @@ index 7699c3d..69538b7 100644
 +    }
      ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
      SDL_RenderPresent(renderer);
++
++    // An idle menu must not spin a core: when vsync is unavailable (software
++    // fallback, or a driver that ignores it) hold the UI at ~60 Hz. This is the
++    // second half of the "launcher is very power heavy" fix.
++    if (!vsync_enabled)
++    {
++      constexpr Uint64 target_ns = 1'000'000'000ull / 60ull;
++      const Uint64 elapsed_ns = SDL_GetTicksNS() - frame_start_ns;
++      if (elapsed_ns < target_ns)
++        SDL_DelayNS(target_ns - elapsed_ns);
++    }
    }
-@@ -1115,150 +1892,184 @@ int main(int argc, char** argv)
+ 
+   if (extraction_thread.joinable())
+@@ -1115,150 +1981,184 @@ int main(int argc, char** argv)
      }
      else
      {
@@ -2688,12 +2794,16 @@ index 7699c3d..69538b7 100644
 -      // Solo only: see the note by the dropdown.
 -      if (launch_mode == LaunchMode::Solo && selected_savestate >= 0 &&
 -          static_cast<std::size_t>(selected_savestate) < launcher_savestates.size())
--      {
++      std::string missing;
++      if (!fs::is_regular_file(SiblingRunner(argv[0])))
+       {
 -        argument_storage.emplace_back("--load-state");
 -        argument_storage.emplace_back(
 -            moderngekko::frontend::PathText(
 -                launcher_savestates[static_cast<std::size_t>(selected_savestate)]));
--      }
++        missing = "The game runner (" MODERNGEKKO_RUNNER_FILENAME ".exe) is missing from this "
++                  "folder. Reinstall the app files next to the launcher.";
+       }
 -      if (launch_mode == LaunchMode::Host)
 -        argument_storage.emplace_back("--netplay-host");
 -      else if (launch_mode == LaunchMode::Join)
@@ -2702,9 +2812,7 @@ index 7699c3d..69538b7 100644
 -        argument_storage.emplace_back(config.netplay_address);
 -      }
 -      if (launch_mode == LaunchMode::Host || launch_mode == LaunchMode::Join)
-+      std::string missing;
-+      if (!fs::is_regular_file(SiblingRunner(argv[0])))
-       {
+-      {
 -        argument_storage.emplace_back("--netplay-port");
 -        argument_storage.emplace_back(std::to_string(config.netplay_port));
 -        argument_storage.emplace_back("--nickname");
@@ -2716,9 +2824,7 @@ index 7699c3d..69538b7 100644
 -          argument_storage.emplace_back("--controller");
 -          argument_storage.emplace_back(controller);
 -        }
-+        missing = "The game runner (" MODERNGEKKO_RUNNER_FILENAME ".exe) is missing from this "
-+                  "folder. Reinstall the app files next to the launcher.";
-       }
+-      }
 -      if (use_wayland)
 -        argument_storage.emplace_back("--wayland");
 -#if defined(__linux__)
@@ -2772,14 +2878,14 @@ index 7699c3d..69538b7 100644
 -        SDL_CloseIO(log_stream);
        }
 -      else
-+      if (!missing.empty())
-       {
+-      {
 -        process = SDL_CreateProcess(arguments.data(), false);
 -        if (!process)
 -          process_error = SDL_GetError();
 -      }
 -      if (!process)
--      {
++      if (!missing.empty())
+       {
 -        launch_error = "Could not start " + SiblingRunner(argv[0]).string() + ": " + process_error;
 -        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Launch failed", launch_error.c_str(),
 +        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Launch failed", missing.c_str(),

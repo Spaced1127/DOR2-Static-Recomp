@@ -161,8 +161,27 @@ code/analysis/build/docs work is allowed.
 
 ## Release
 
-- Version: **v0.1.7** (published 2026-11-16). Supersedes v0.1.5. v0.1.6
-  (controller-only) was staged and never published; v0.1.7 contains both fixes.
+- Version: **v0.1.8** (launcher power/crash fix; published 2026-11-16).
+  Prior: v0.1.7 (controller profile + memory card hotfix), v0.1.5.
+- v0.1.8 adds the **launcher fix** (player report: "very power heavy ... and will
+  crash, so i can't adjust settings"):
+  - Root cause: `SDL_CreateRenderer(window, "software")` was tried FIRST and never
+    fails, so the launcher always rasterised the whole window on the CPU with no
+    usable vsync (uncapped redraw loop).
+  - Fix (`tools/moderngekko_launcher.cpp`): GPU renderer first (software only as a
+    last-resort fallback, logged), vsync requested on the real renderer, and a
+    hard 60 fps cap when vsync is refused.
+  - Measured (idle, 12 s sample, same window): **0.97 -> 0.03 CPU cores**;
+    renderer now `direct3d11`.
+  - New `Logs\launcher.log` (renderer, vsync, SDL messages). The player report had
+    no log; the next one will.
+  - Crash NOT reproduced (23 s + 12 s idle runs, clean WM_CLOSE each time, no log
+    available from the reporter). Removed the sustained full-core burn on the
+    reported machine class and made a future crash diagnosable.
+  - Stutter/load measured, not "fixed": cold shader compile dominates the first
+    boot (~30 s to full speed on a fresh `Cache\Shaders`; 5.4 fps at t+32 s ->
+    59.94 fps from t+40 s), then flat 59.94 with speed 1.0. No streaming stall
+    observed; warm-cache load time not separately timed.
 - Ship decision (user-approved 2026-11-11): **JIT default, static recomp opt-in
   (experimental)** due to the rare static-core heavy-mode corruption.
 - v0.1.7 adds the **memory-card fix** (shared pattern with Aggressive Inline):
@@ -194,8 +213,6 @@ code/analysis/build/docs work is allowed.
   keyboard profile whenever no pad had enumerated yet; and the `a>b => Nintendo`
   rule is now scoped to 8BitDo (0x2DC8) so PS3/PS2/generic pads keep standard
   buttons and unmirrored D-pads.
-- Published: **yes** (v0.1.7) - https://github.com/Spaced1127/DOR2-Static-Recomp/releases/tag/v0.1.7
-  (user-approved 2026-11-16; commit 1c083a1, tag v0.1.7, assets
   `DOR2StaticRecomp-v0.1.7-Windows-x64.zip` + `SHA256SUMS.txt`).
   Prior: v0.1.5 (69f9a5d), v0.1.4 (0de9381), v0.1.3 (96de8a8), v0.1.2 (1b5585f),
   v0.1.1 (c31cb7f), v0.1.0 (7f11135).
@@ -246,14 +263,23 @@ code/analysis/build/docs work is allowed.
   staged launcher `--extract` (progress 1.000); staged single-runner JIT boot on a
   hidden desktop (run-hidden.ps1) 59.9403 fps / vps 59.9401 / speed 1; controller
   unit tests pass (8BitDo Nintendo/Ultimate/64/Switch-mode/reversed dpad/no regression).
-- Release notes: `dist\release-notes-v0.1.7.md` (superseded: v0.1.6, v0.1.5)
+
 - Published: **yes** — https://github.com/Spaced1127/DOR2-Static-Recomp/releases/tag/v0.1.5
   (user-approved; commit 69f9a5d, tag v0.1.5). Prior: v0.1.4 (0de9381), v0.1.3 (96de8a8), v0.1.2 (1b5585f), v0.1.1 (c31cb7f), v0.1.0 (7f11135).
 - `repo` field: `Spaced1127/DOR2-Static-Recomp`
 - Download-back verified (v0.1.7): asset SHA-256 matches `SHA256SUMS.txt` and the
   local build (`151206e5…f96c55`, 33,764,697 bytes); release public, not a draft;
   assets: zip + SHA256SUMS only; game-data scan clean on the downloaded zip.
-- Release notes published from `dist\release-notes-v0.1.7.md`.
+- Published: **yes** (v0.1.8) - https://github.com/Spaced1127/DOR2-Static-Recomp/releases/tag/v0.1.8
+  (user-approved 2026-11-16; assets `DOR2StaticRecomp-v0.1.8-Windows-x64.zip` +
+  `SHA256SUMS.txt`). Prior: v0.1.7, v0.1.5 (69f9a5d), v0.1.4 (0de9381),
+  v0.1.3 (96de8a8), v0.1.2 (1b5585f), v0.1.1 (c31cb7f), v0.1.0 (7f11135).
+- Package (v0.1.8): zip SHA-256
+  `b935ca666d2f3a7bfbff499112d48c888ba2a8727633b181ca6839bd011974e3`; exes
+  0.1.8.0; game-data scan clean; staged-artifact boot smoke (visible window, JIT):
+  `booted=1`, fps 59.9423 / vps 59.9396 / speed 1, frames 1091, graceful
+  automation stop, `GC/MemoryCardA.USA.raw` 16,777,216 B created.
+- Release notes: `dist/release-notes-v0.1.8.md`.
 - Release notes amended 2026-11-16 (text only, assets untouched) to state
   explicitly: profile rewrite only with a pad present, device fallback, SDL hint
   parity, 8BitDo scoping, DualSense/Edge D-pad un-mirrored, Elite S2 `0B22`,
